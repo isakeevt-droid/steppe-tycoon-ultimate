@@ -535,10 +535,22 @@ async function upgradeStorage() {
 }
 
 async function mineClick() {
-  state = await api("/api/mine/click", "POST", {
-    telegram_id: telegramId,
-  });
-  renderAll();
+  const oldGold = Number(state?.player?.gold || 0);
+  const clickIncome = Number(state?.player?.mine_click_income || 1);
+
+  state.player.gold = oldGold + clickIncome;
+  renderTopBar();
+
+  try {
+    state = await api("/api/mine/click", "POST", {
+      telegram_id: telegramId,
+    });
+    renderAll();
+  } catch (error) {
+    state.player.gold = oldGold;
+    renderTopBar();
+    showError(error);
+  }
 }
 
 async function upgradeMine() {
@@ -595,7 +607,10 @@ $("buy_dirham_btn").onclick = () => buyDirham().catch(showError);
 $("upgrade_storage_btn").onclick = () => upgradeStorage().catch(showError);
 $("open_chest_btn").onclick = () => openChest().catch(showError);
 $("upgrade_mine_btn").onclick = () => upgradeMine().catch(showError);
-$("mine_click_btn").onclick = () => mineClick().catch(showError);
+$("mine_click_btn").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  mineClick().catch(showError);
+});
 $("send_caravan_btn").onclick = () => sendCaravan().catch(showError);
 
 document.querySelectorAll(".process-btn").forEach((btn) => {
