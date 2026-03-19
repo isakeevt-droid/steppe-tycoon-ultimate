@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,6 +9,10 @@ from pydantic import BaseModel, Field
 class AuthRequest(BaseModel):
     telegram_id: str = Field(min_length=1, max_length=64)
     username: str | None = None
+
+
+class TelegramAuthRequest(BaseModel):
+    init_data: str = Field(min_length=1)
 
 
 class BuildingActionRequest(BaseModel):

@@ -4,11 +4,9 @@ let state = null;
 let telegramId = localStorage.getItem("steppe_tg_id") || "";
 let username = localStorage.getItem("steppe_username") || "";
 let activeTab = localStorage.getItem("steppe_active_tab") || "overview";
+let isTelegramMode = false;
 
 const $ = (id) => document.getElementById(id);
-
-$("telegram_id_input").value = telegramId;
-$("username_input").value = username;
 
 function bindTabControls() {
   document.querySelectorAll(".tab, .mobile-nav-btn").forEach((btn) => {
@@ -61,7 +59,7 @@ function formatInt(value) {
 }
 
 function formatTime(seconds) {
-  const total = Math.max(0, Number(seconds || 0));
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
   const hours = Math.floor(total / 3600);
   const mins = Math.floor((total % 3600) / 60);
   const secs = total % 60;
@@ -112,6 +110,25 @@ function resourceIcon(key) {
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function showAuthScreen() {
+  $("auth_block").classList.remove("hidden");
+  $("game_block").classList.add("hidden");
+}
+
+function showGameScreen() {
+  $("auth_block").classList.add("hidden");
+  $("game_block").classList.remove("hidden");
+}
+
+function fillAuthInputs() {
+  if ($("telegram_id_input")) {
+    $("telegram_id_input").value = telegramId;
+  }
+  if ($("username_input")) {
+    $("username_input").value = username;
+  }
 }
 
 function renderTopBar() {
@@ -386,12 +403,11 @@ async function loadState() {
   }
 
   state = await api(`/api/state/${telegramId}`);
-  $("auth_block").classList.add("hidden");
-  $("game_block").classList.remove("hidden");
+  showGameScreen();
   renderAll();
 }
 
-async function auth() {
+async function authManual() {
   telegramId = $("telegram_id_input").value.trim();
   username = $("username_input").value.trim() || "Игрок";
 
@@ -408,9 +424,58 @@ async function auth() {
     username,
   });
 
-  $("auth_block").classList.add("hidden");
-  $("game_block").classList.remove("hidden");
+  showGameScreen();
   renderAll();
+}
+
+async function authTelegram(initData) {
+  state = await api("/api/auth/telegram", "POST", {
+    init_data: initData,
+  });
+
+  telegramId = String(state.player.telegram_id || "");
+  username = state.player.username || "Игрок";
+
+  localStorage.setItem("steppe_tg_id", telegramId);
+  localStorage.setItem("steppe_username", username);
+
+  showGameScreen();
+  renderAll();
+}
+
+async function bootTelegramAuth() {
+  const tg = window.Telegram?.WebApp;
+
+  if (!tg) {
+    fillAuthInputs();
+    if (telegramId) {
+      await loadState();
+    } else {
+      showAuthScreen();
+    }
+    return;
+  }
+
+  try {
+    tg.ready();
+    tg.expand();
+  } catch (_) {}
+
+  const initData = tg.initData || "";
+  const user = tg.initDataUnsafe?.user || null;
+
+  if (!initData || !user?.id) {
+    fillAuthInputs();
+    if (telegramId) {
+      await loadState();
+    } else {
+      showAuthScreen();
+    }
+    return;
+  }
+
+  isTelegramMode = true;
+  await authTelegram(initData);
 }
 
 async function buyBuilding(buildingKey) {
@@ -525,7 +590,7 @@ function showError(error) {
   alert(error.message || "Ошибка");
 }
 
-$("auth_btn").onclick = () => auth().catch(showError);
+$("auth_btn").onclick = () => authManual().catch(showError);
 $("buy_dirham_btn").onclick = () => buyDirham().catch(showError);
 $("upgrade_storage_btn").onclick = () => upgradeStorage().catch(showError);
 $("open_chest_btn").onclick = () => openChest().catch(showError);
@@ -542,9 +607,11 @@ document.querySelectorAll(".worker-upgrade-btn").forEach((btn) => {
 });
 
 setInterval(() => {
+  if (!telegramId) {
+    return;
+  }
   loadState().catch(() => {});
 }, 5000);
 
-if (telegramId) {
-  loadState().catch(() => {});
-}
+fillAuthInputs();
+bootTelegramAuth().catch(showError);
