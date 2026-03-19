@@ -6,11 +6,43 @@ let username = localStorage.getItem("steppe_username") || "";
 let activeTab = localStorage.getItem("steppe_active_tab") || "overview";
 let isTelegramMode = false;
 
+const locks = {};
+let lastErrorAt = 0;
+let chestTickerStarted = false;
+
 const $ = (id) => document.getElementById(id);
+
+function withLock(key, fn) {
+  if (locks[key]) {
+    return Promise.resolve();
+  }
+
+  locks[key] = true;
+
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      locks[key] = false;
+    });
+}
+
+function addFastHandler(element, handler) {
+  if (!element) {
+    return;
+  }
+
+  element.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handler();
+  });
+}
 
 function bindTabControls() {
   document.querySelectorAll(".tab, .mobile-nav-btn").forEach((btn) => {
-    btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    btn.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      activateTab(btn.dataset.tab);
+    });
   });
 }
 
@@ -40,7 +72,19 @@ async function api(path, method = "GET", body = null) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.detail || "Ошибка запроса");
+    let message = "Ошибка запроса";
+
+    if (typeof data.detail === "string") {
+      message = data.detail;
+    } else if (Array.isArray(data.detail) && data.detail.length) {
+      message = data.detail
+        .map((item) => item.msg || item.message || "Ошибка валидации")
+        .join(", ");
+    } else if (typeof data.message === "string" && data.message) {
+      message = data.message;
+    }
+
+    throw new Error(message);
   }
 
   return data;
@@ -112,6 +156,22 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function getResourceAmount(resourceKey) {
+  const item = safeArray(state?.resources).find((resource) => resource.key === resourceKey);
+  return Number(item?.amount || 0);
+}
+
+function getRecipeInputKey(recipeKey) {
+  const map = {
+    mill: "grain",
+    weavery: "wool",
+    planks: "wood",
+    forge: "ore",
+  };
+
+  return map[recipeKey] || "";
+}
+
 function showAuthScreen() {
   $("auth_block").classList.remove("hidden");
   $("game_block").classList.add("hidden");
@@ -143,6 +203,70 @@ function renderTopBar() {
   $("title_value").textContent = state.player.title_name || "—";
 }
 
+function renderQuickActionButtons() {
+  if (!state || !state.player) {
+    return;
+  }
+
+  const dirhamCost = format(state.player.dirham_price || 0);
+  const storageCost = format(state.player.storage_upgrade_cost || 0);
+  const mineCost = format(state.player.mine_upgrade_cost || 0);
+
+  const dirhamBtn = $("buy_dirham_btn");
+  const storageBtn = $("upgrade_storage_btn");
+  const mineBtn = $("upgrade_mine_btn");
+  const chestBtn = $("open_chest_btn");
+  const quickInfo = $("quick_info");
+
+  if (dirhamBtn) {
+    dirhamBtn.textContent = `💠 Купить 1 дирхам — ${dirhamCost} золота`;
+    dirhamBtn.disabled = Number(state.player.gold || 0) < Number(state.player.dirham_price || 0);
+  }
+
+  if (storageBtn) {
+    storageBtn.textContent = `📦 Улучшить склад — ${storageCost} золота`;
+    storageBtn.disabled = Number(state.player.gold || 0) < Number(state.player.storage_upgrade_cost || 0);
+  }
+
+  if (mineBtn) {
+    mineBtn.textContent = `⛏️ Улучшить шахту — ${mineCost} золота`;
+    mineBtn.disabled = Number(state.player.gold || 0) < Number(state.player.mine_upgrade_cost || 0);
+  }
+
+  const hasChestState =
+    Object.prototype.hasOwnProperty.call(state.player, "chest_available") ||
+    Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds");
+
+  if (chestBtn) {
+    if (hasChestState) {
+      const chestAvailable = Boolean(state.player.chest_available);
+      const chestSeconds = Number(state.player.chest_ready_in_seconds || 0);
+
+      if (chestAvailable) {
+        chestBtn.textContent = "🎁 Открыть сундук";
+        chestBtn.disabled = false;
+      } else {
+        chestBtn.textContent = `🎁 Сундук через ${formatTime(chestSeconds)}`;
+        chestBtn.disabled = true;
+      }
+
+      if (quickInfo) {
+        quickInfo.textContent = chestAvailable
+          ? "Сундук готов к открытию."
+          : `До открытия сундука: ${formatTime(chestSeconds)}`;
+      }
+    } else {
+      chestBtn.textContent = "🎁 Открыть сундук";
+      chestBtn.disabled = false;
+
+      if (quickInfo) {
+        quickInfo.textContent =
+          `💠 Дирхам: ${dirhamCost} золота • 📦 Склад: ${storageCost} • ⛏️ Шахта: ${mineCost}`;
+      }
+    }
+  }
+}
+
 function renderOverview() {
   const profile = $("profile_stats");
   profile.innerHTML = "";
@@ -169,9 +293,6 @@ function renderOverview() {
     `;
     profile.appendChild(div);
   });
-
-  $("quick_info").textContent =
-    `💠 Дирхам: ${format(state.player.dirham_price)} золота • 📦 Склад: ${format(state.player.storage_upgrade_cost)} • ⛏️ Шахта: ${format(state.player.mine_upgrade_cost)}`;
 
   const overview = $("overview_resources");
   overview.innerHTML = "";
@@ -205,7 +326,9 @@ function renderBuildings() {
   });
 
   list.querySelectorAll("[data-building]").forEach((btn) => {
-    btn.onclick = () => buyBuilding(btn.dataset.building);
+    addFastHandler(btn, () => {
+      withLock(`building:${btn.dataset.building}`, () => buyBuilding(btn.dataset.building).catch(showError));
+    });
   });
 }
 
@@ -228,7 +351,9 @@ function renderWorkers() {
   });
 
   list.querySelectorAll("[data-worker]").forEach((btn) => {
-    btn.onclick = () => hireWorker(btn.dataset.worker);
+    addFastHandler(btn, () => {
+      withLock(`worker:${btn.dataset.worker}`, () => hireWorker(btn.dataset.worker).catch(showError));
+    });
   });
 }
 
@@ -269,7 +394,11 @@ function renderTrade() {
   });
 
   sellList.querySelectorAll("[data-resource]").forEach((btn) => {
-    btn.onclick = () => sellResource(btn.dataset.resource, Number(btn.dataset.amount));
+    addFastHandler(btn, () => {
+      withLock(`sell:${btn.dataset.resource}`, () =>
+        sellResource(btn.dataset.resource, Number(btn.dataset.amount)).catch(showError),
+      );
+    });
   });
 }
 
@@ -330,7 +459,9 @@ function renderCaravans() {
   });
 
   list.querySelectorAll(".claim-btn").forEach((btn) => {
-    btn.onclick = () => claimCaravan(btn.dataset.caravanId);
+    addFastHandler(btn, () => {
+      withLock(`claim:${btn.dataset.caravanId}`, () => claimCaravan(btn.dataset.caravanId).catch(showError));
+    });
   });
 }
 
@@ -388,6 +519,7 @@ function renderAll() {
   }
 
   renderTopBar();
+  renderQuickActionButtons();
   renderOverview();
   renderBuildings();
   renderWorkers();
@@ -412,8 +544,7 @@ async function authManual() {
   username = $("username_input").value.trim() || "Игрок";
 
   if (!telegramId) {
-    alert("Введите Telegram ID");
-    return;
+    throw new Error("Введите Telegram ID");
   }
 
   localStorage.setItem("steppe_tg_id", telegramId);
@@ -448,17 +579,23 @@ async function bootTelegramAuth() {
 
   if (!tg) {
     fillAuthInputs();
+
     if (telegramId) {
       await loadState();
     } else {
       showAuthScreen();
     }
+
     return;
   }
 
   try {
     tg.ready();
     tg.expand();
+
+    if (typeof tg.disableVerticalSwipes === "function") {
+      tg.disableVerticalSwipes();
+    }
   } catch (_) {}
 
   const initData = tg.initData || "";
@@ -466,11 +603,13 @@ async function bootTelegramAuth() {
 
   if (!initData || !user?.id) {
     fillAuthInputs();
+
     if (telegramId) {
       await loadState();
     } else {
       showAuthScreen();
     }
+
     return;
   }
 
@@ -503,6 +642,12 @@ async function upgradeWorker(upgradeKey) {
 }
 
 async function processRecipe(recipeKey) {
+  const inputKey = getRecipeInputKey(recipeKey);
+
+  if (inputKey && getResourceAmount(inputKey) < 10) {
+    throw new Error("Недостаточно сырья");
+  }
+
   state = await api("/api/process", "POST", {
     telegram_id: telegramId,
     recipe_key: recipeKey,
@@ -512,6 +657,14 @@ async function processRecipe(recipeKey) {
 }
 
 async function sellResource(resourceKey, amount) {
+  if (!amount || amount <= 0) {
+    throw new Error("Некорректное количество");
+  }
+
+  if (getResourceAmount(resourceKey) < amount) {
+    throw new Error("Недостаточно ресурса");
+  }
+
   state = await api("/api/sell", "POST", {
     telegram_id: telegramId,
     resource_key: resourceKey,
@@ -535,22 +688,11 @@ async function upgradeStorage() {
 }
 
 async function mineClick() {
-  const oldGold = Number(state?.player?.gold || 0);
-  const clickIncome = Number(state?.player?.mine_click_income || 1);
-
-  state.player.gold = oldGold + clickIncome;
+  state = await api("/api/mine/click", "POST", {
+    telegram_id: telegramId,
+  });
   renderTopBar();
-
-  try {
-    state = await api("/api/mine/click", "POST", {
-      telegram_id: telegramId,
-    });
-    renderAll();
-  } catch (error) {
-    state.player.gold = oldGold;
-    renderTopBar();
-    showError(error);
-  }
+  renderOverview();
 }
 
 async function upgradeMine() {
@@ -561,13 +703,32 @@ async function upgradeMine() {
 }
 
 async function sendCaravan() {
+  const routeKey = $("route_select").value;
+  const guardLevel = $("guard_select").value;
+  const resourceKey = $("caravan_resource_select").value;
   const amount = Number($("caravan_amount_input").value || "0");
+
+  if (!routeKey) {
+    throw new Error("Выбери маршрут");
+  }
+
+  if (!resourceKey) {
+    throw new Error("Выбери ресурс");
+  }
+
+  if (!amount || amount <= 0) {
+    throw new Error("Укажи количество больше 0");
+  }
+
+  if (getResourceAmount(resourceKey) < amount) {
+    throw new Error("Недостаточно ресурса для каравана");
+  }
 
   state = await api("/api/caravan/send", "POST", {
     telegram_id: telegramId,
-    route_key: $("route_select").value,
-    guard_level: $("guard_select").value,
-    resource_key: $("caravan_resource_select").value,
+    route_key: routeKey,
+    guard_level: guardLevel,
+    resource_key: resourceKey,
     amount,
   });
 
@@ -576,22 +737,27 @@ async function sendCaravan() {
 
 async function claimCaravan(id) {
   if (!id) {
-    alert("Не найден ID каравана");
-    return;
+    throw new Error("Не найден ID каравана");
   }
 
-  try {
-    state = await api("/api/caravan/claim", "POST", {
-      telegram_id: telegramId,
-      caravan_id: Number(id),
-    });
-    renderAll();
-  } catch (error) {
-    alert(error.message || "Не удалось забрать награду");
-  }
+  state = await api("/api/caravan/claim", "POST", {
+    telegram_id: telegramId,
+    caravan_id: Number(id),
+  });
+  renderAll();
 }
 
 async function openChest() {
+  const hasChestState =
+    state &&
+    state.player &&
+    (Object.prototype.hasOwnProperty.call(state.player, "chest_available") ||
+      Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds"));
+
+  if (hasChestState && !state.player.chest_available) {
+    throw new Error(`Сундук ещё не готов: ${formatTime(state.player.chest_ready_in_seconds || 0)}`);
+  }
+
   state = await api("/api/chest/open", "POST", {
     telegram_id: telegramId,
   });
@@ -599,32 +765,96 @@ async function openChest() {
 }
 
 function showError(error) {
+  const now = Date.now();
+
+  if (now - lastErrorAt < 1200) {
+    return;
+  }
+
+  lastErrorAt = now;
   alert(error.message || "Ошибка");
 }
 
-$("auth_btn").onclick = () => authManual().catch(showError);
-$("buy_dirham_btn").onclick = () => buyDirham().catch(showError);
-$("upgrade_storage_btn").onclick = () => upgradeStorage().catch(showError);
-$("open_chest_btn").onclick = () => openChest().catch(showError);
-$("upgrade_mine_btn").onclick = () => upgradeMine().catch(showError);
-$("mine_click_btn").addEventListener("pointerdown", (e) => {
-  e.preventDefault();
-  mineClick().catch(showError);
-});
-$("send_caravan_btn").onclick = () => sendCaravan().catch(showError);
+function bindStaticButtons() {
+  addFastHandler($("auth_btn"), () => {
+    withLock("auth", () => authManual().catch(showError));
+  });
 
-document.querySelectorAll(".process-btn").forEach((btn) => {
-  btn.onclick = () => processRecipe(btn.dataset.recipe).catch(showError);
-});
+  addFastHandler($("buy_dirham_btn"), () => {
+    withLock("dirham", () => buyDirham().catch(showError));
+  });
 
-document.querySelectorAll(".worker-upgrade-btn").forEach((btn) => {
-  btn.onclick = () => upgradeWorker(btn.dataset.upgrade).catch(showError);
-});
+  addFastHandler($("upgrade_storage_btn"), () => {
+    withLock("storage", () => upgradeStorage().catch(showError));
+  });
+
+  addFastHandler($("open_chest_btn"), () => {
+    withLock("chest", () => openChest().catch(showError));
+  });
+
+  addFastHandler($("upgrade_mine_btn"), () => {
+    withLock("mine_upgrade", () => upgradeMine().catch(showError));
+  });
+
+  addFastHandler($("mine_click_btn"), () => {
+    withLock("mine_click", () => mineClick().catch(showError));
+  });
+
+  addFastHandler($("send_caravan_btn"), () => {
+    withLock("send_caravan", () => sendCaravan().catch(showError));
+  });
+
+  document.querySelectorAll(".process-btn").forEach((btn) => {
+    addFastHandler(btn, () => {
+      withLock(`process:${btn.dataset.recipe}`, () => processRecipe(btn.dataset.recipe).catch(showError));
+    });
+  });
+
+  document.querySelectorAll(".worker-upgrade-btn").forEach((btn) => {
+    addFastHandler(btn, () => {
+      withLock(`worker_upgrade:${btn.dataset.upgrade}`, () => upgradeWorker(btn.dataset.upgrade).catch(showError));
+    });
+  });
+}
+
+function startChestTicker() {
+  if (chestTickerStarted) {
+    return;
+  }
+
+  chestTickerStarted = true;
+
+  setInterval(() => {
+    if (!state || !state.player) {
+      return;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(state.player, "chest_available") &&
+      Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds") &&
+      !state.player.chest_available &&
+      Number(state.player.chest_ready_in_seconds) > 0
+    ) {
+      state.player.chest_ready_in_seconds -= 1;
+
+      if (state.player.chest_ready_in_seconds <= 0) {
+        state.player.chest_ready_in_seconds = 0;
+        state.player.chest_available = true;
+      }
+
+      renderQuickActionButtons();
+    }
+  }, 1000);
+}
+
+bindStaticButtons();
+startChestTicker();
 
 setInterval(() => {
   if (!telegramId) {
     return;
   }
+
   loadState().catch(() => {});
 }, 5000);
 
