@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Steppe Tycoon</title>
+  <link rel="stylesheet" href="/frontend/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-pill">
+        <span class="brand-mark">🐫</span>
+        <div>
+          <div class="brand-title">Steppe Tycoon</div>
+          <div class="brand-subtitle">Шёлковый путь</div>
+        </div>
+      </div>
+
+      <div class="top-stats">
+        <div class="top-item" title="Основная валюта для развития хозяйства и торговли">
+          <span class="top-icon">🪙</span>
+          <div class="top-meta">
+            <span class="label">Золото</span>
+            <span id="gold_value" class="value">0</span>
+          </div>
+        </div>
+
+        <div class="top-item" title="Редкая валюта для охраны караванов и улучшений">
+          <span class="top-icon">💠</span>
+          <div class="top-meta">
+            <span class="label">Дирхамы</span>
+            <span id="dirham_value" class="value">0</span>
+          </div>
+        </div>
+
+        <div class="top-item" title="Если склад заполнен, производство и торговля упираются в лимит">
+          <span class="top-icon">📦</span>
+          <div class="top-meta">
+            <span class="label">Склад</span>
+            <span id="storage_value" class="value">0 / 0</span>
+          </div>
+        </div>
+
+        <div class="top-item" title="Суммарный бонус от достижений и званий">
+          <span class="top-icon">✨</span>
+          <div class="top-meta">
+            <span class="label">Бонус</span>
+            <span id="bonus_value" class="value">0%</span>
+          </div>
+        </div>
+
+        <div class="top-item" title="Текущий торговый статус игрока">
+          <span class="top-icon">👑</span>
+          <div class="top-meta">
+            <span class="label">Звание</span>
+            <span id="title_value" class="value">—</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section id="auth_block" class="auth-screen">
+        <div class="auth-card">
+          <div class="hero-row">
+            <div class="hero-icon">🏜️</div>
+            <div>
+              <h1>Steppe Tycoon</h1>
+              <p>Построй торговую империю Шёлкового пути: производи, перерабатывай, продавай и отправляй караваны по историческим маршрутам.</p>
+            </div>
+          </div>
+
+          <div class="auth-grid">
+            <label class="field">
+              <span>Telegram ID / локальный ID</span>
+              <input id="telegram_id_input" type="text" placeholder="Например: 123456" />
+            </label>
+
+            <label class="field">
+              <span>Имя игрока</span>
+              <input id="username_input" type="text" placeholder="Имя игрока" />
+            </label>
+
+            <button id="auth_btn" class="primary-btn auth-btn">Войти в игру</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="game_block" class="game hidden">
+        <nav class="tabs" aria-label="Разделы игры">
+          <button class="tab active" data-tab="overview"><span>🏠</span><span>Обзор</span></button>
+          <button class="tab" data-tab="production"><span>🏭</span><span>Производство</span></button>
+          <button class="tab" data-tab="trade"><span>💰</span><span>Торговля</span></button>
+          <button class="tab" data-tab="caravans"><span>🐫</span><span>Караваны</span></button>
+          <button class="tab" data-tab="mine"><span>⛏️</span><span>Шахта</span></button>
+          <button class="tab" data-tab="achievements"><span>🏆</span><span>Достижения</span></button>
+          <button class="tab" data-tab="top"><span>📈</span><span>Топ</span></button>
+        </nav>
+
+        <section class="tab-content active" id="tab-overview">
+          <div class="layout two-col">
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Профиль</h2>
+                <span class="chip">Игрок</span>
+              </div>
+              <div id="profile_stats" class="stats-grid"></div>
+            </div>
+
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Быстрые действия</h2>
+                <span class="chip">Ускорение</span>
+              </div>
+
+              <div class="quick-actions">
+                <button id="buy_dirham_btn" class="action-btn">💠 Купить 1 дирхам</button>
+                <button id="upgrade_storage_btn" class="action-btn">📦 Улучшить склад</button>
+                <button id="open_chest_btn" class="action-btn">🎁 Открыть сундук</button>
+                <button id="upgrade_mine_btn" class="action-btn">⛏️ Улучшить шахту</button>
+              </div>
+
+              <div id="quick_info" class="info-box"></div>
+            </div>
+          </div>
+
+          <div class="panel scroll-panel">
+            <div class="panel-header">
+              <h2>Ресурсы</h2>
+              <span class="chip">Склад и рынок</span>
+            </div>
+            <div id="overview_resources" class="cards-grid compact-grid"></div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-production">
+          <div class="layout two-col">
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Здания</h2>
+                <span class="chip">Рост базы</span>
+              </div>
+              <div id="buildings_list" class="cards-grid"></div>
+            </div>
+
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Работники</h2>
+                <span class="chip">Эффективность</span>
+              </div>
+              <div id="workers_list" class="cards-grid"></div>
+
+              <div class="subsection">
+                <h3>Улучшение работников</h3>
+                <div class="quick-actions">
+                  <button data-upgrade="novice_to_worker" class="action-btn worker-upgrade-btn">🧑‍🌾 бедолага → чуть шарящий бедолага</button>
+                  <button data-upgrade="worker_to_specialist" class="action-btn worker-upgrade-btn">🧠 шарящий → норм тип</button>
+                  <button data-upgrade="specialist_to_master" class="action-btn worker-upgrade-btn">👑 норм тип → чоткий ваще</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-trade">
+          <div class="layout two-col">
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Продажа на рынке</h2>
+                <span class="chip">Быстрая прибыль</span>
+              </div>
+              <div id="sell_list" class="cards-grid"></div>
+            </div>
+
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Переработка</h2>
+                <span class="chip">Больше ценности</span>
+              </div>
+              <div class="quick-actions">
+                <button data-recipe="mill" class="action-btn process-btn">🌾 10 зерна → 10 муки</button>
+                <button data-recipe="weavery" class="action-btn process-btn">🧶 10 шерсти → 10 ткани</button>
+                <button data-recipe="planks" class="action-btn process-btn">🪵 10 древесины → 10 досок</button>
+                <button data-recipe="forge" class="action-btn process-btn">⛓️ 10 руды → 10 металла</button>
+              </div>
+              <div class="info-box">Переработанные товары обычно выгоднее сырья и особенно сильны на дальних маршрутах.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-caravans">
+          <div class="layout two-col">
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Отправить караван</h2>
+                <span class="chip">Риск / выгода</span>
+              </div>
+
+              <div class="form-grid">
+                <label class="field">
+                  <span>Маршрут</span>
+                  <select id="route_select"></select>
+                </label>
+
+                <label class="field">
+                  <span>Охрана</span>
+                  <select id="guard_select">
+                    <option value="none">Без охраны</option>
+                    <option value="basic">Базовая</option>
+                    <option value="experienced">Опытная</option>
+                    <option value="elite">Элитная</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Ресурс</span>
+                  <select id="caravan_resource_select"></select>
+                </label>
+
+                <label class="field">
+                  <span>Количество</span>
+                  <input id="caravan_amount_input" type="number" min="1" value="10" />
+                </label>
+              </div>
+
+              <button id="send_caravan_btn" class="primary-btn">🐫 Отправить караван</button>
+              <div class="info-box">Дальние города дают больше прибыли, но повышают риск. Охрана снижает потери и помогает пережить плохие события.</div>
+            </div>
+
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Активные караваны</h2>
+                <span class="chip">Таймеры</span>
+              </div>
+              <div id="caravans_list" class="cards-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-mine">
+          <div class="layout mine-layout">
+            <div class="panel mine-panel">
+              <div class="panel-header">
+                <h2>Ручная шахта</h2>
+                <span class="chip">Доп. доход</span>
+              </div>
+              <div class="mine-copy">Жоска пахай, чучут золота палучиш.</div>
+              <button id="mine_click_btn" class="mine-btn">⛏️ Добыть</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-achievements">
+          <div class="layout two-col">
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Достижения</h2>
+                <span class="chip">Постоянные бонусы</span>
+              </div>
+              <div id="achievements_list" class="cards-grid"></div>
+            </div>
+
+            <div class="panel scroll-panel">
+              <div class="panel-header">
+                <h2>Звания</h2>
+                <span class="chip">Долгосрочный рост</span>
+              </div>
+              <div id="titles_list" class="cards-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" id="tab-top">
+          <div class="panel scroll-panel">
+            <div class="panel-header">
+              <h2>Топ игроков</h2>
+              <span class="chip">Рейтинг</span>
+            </div>
+            <div id="leaderboard_list" class="cards-grid"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="bottom-nav">
+      <button class="mobile-nav-btn active" data-tab="overview">🏠</button>
+      <button class="mobile-nav-btn" data-tab="production">🏭</button>
+      <button class="mobile-nav-btn" data-tab="trade">💰</button>
+      <button class="mobile-nav-btn" data-tab="caravans">🐫</button>
+      <button class="mobile-nav-btn" data-tab="mine">⛏️</button>
+      <button class="mobile-nav-btn" data-tab="achievements">🏆</button>
+      <button class="mobile-nav-btn" data-tab="top">📈</button>
+    </footer>
+  </div>
+
+  <script src="/frontend/app.js"></script>
+</body>
+</html>
