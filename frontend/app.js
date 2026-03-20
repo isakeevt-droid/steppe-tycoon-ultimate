@@ -1,862 +1,522 @@
 const API = window.location.origin;
+const AUTO_CLEAR_KEY = 'steppe_hidden_completed_caravans';
 
 let state = null;
-let telegramId = localStorage.getItem("steppe_tg_id") || "";
-let username = localStorage.getItem("steppe_username") || "";
-let activeTab = localStorage.getItem("steppe_active_tab") || "overview";
-let isTelegramMode = false;
-
-const locks = {};
-let lastErrorAt = 0;
-let chestTickerStarted = false;
+let telegramId = '';
+let username = '';
+let selectedTab = localStorage.getItem('steppe_tab') || 'overview';
+let productionFilter = ['producing','processing'].includes(localStorage.getItem('steppe_production_filter')) ? localStorage.getItem('steppe_production_filter') : 'producing';
+let refreshTimer = null;
 
 const $ = (id) => document.getElementById(id);
+const ICONS = {
+  gold: '🪙', dirhams: '💠', storage: '📦', grain: '🌾', wool: '🐑', wood: '🪵', ore: '⛏️', flour: '🥣', cloth: '🧵', planks: '🪚', metal: '🔩',
+  farm: '🌾', pasture: '🐑', lumbermill: '🪵', ore_mine: '⛰️', mill: '🥣', weavery: '🧵', carpentry: '🪚', forge: '🔥', mine: '⛰️', pickaxe: '⛏️', crit: '💥'
+};
+const GUARD_META = {
+  none: { name: 'Без охраны', risk_reduction: 0, cost_dirhams: 0 },
+  basic: { name: 'Базовая', risk_reduction: 15, cost_dirhams: 1 },
+  experienced: { name: 'Опытная', risk_reduction: 25, cost_dirhams: 2 },
+  elite: { name: 'Элитная', risk_reduction: 100, cost_dirhams: 4 },
+};
 
-function withLock(key, fn) {
-  if (locks[key]) {
-    return Promise.resolve();
-  }
-
-  locks[key] = true;
-
-  return Promise.resolve()
-    .then(fn)
-    .finally(() => {
-      locks[key] = false;
-    });
+function safeText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
 }
 
-function addFastHandler(element, handler) {
-  if (!element) {
-    return;
-  }
-
-  element.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    handler();
-  });
+function safeHtml(id, value) {
+  const el = $(id);
+  if (el) el.innerHTML = value;
 }
 
-function bindTabControls() {
-  document.querySelectorAll(".tab, .mobile-nav-btn").forEach((btn) => {
-    btn.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      activateTab(btn.dataset.tab);
-    });
-  });
-}
-
-function activateTab(tabName) {
-  activeTab = tabName;
-  localStorage.setItem("steppe_active_tab", tabName);
-
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === tabName));
-  document.querySelectorAll(".mobile-nav-btn").forEach((x) => x.classList.toggle("active", x.dataset.tab === tabName));
-  document.querySelectorAll(".tab-content").forEach((x) => x.classList.toggle("active", x.id === "tab-" + tabName));
-}
-
-bindTabControls();
-activateTab(activeTab);
-
-async function api(path, method = "GET", body = null) {
-  const options = {
-    method,
-    headers: { "Content-Type": "application/json" },
-  };
-
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(API + path, options);
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    let message = "Ошибка запроса";
-
-    if (typeof data.detail === "string") {
-      message = data.detail;
-    } else if (Array.isArray(data.detail) && data.detail.length) {
-      message = data.detail
-        .map((item) => item.msg || item.message || "Ошибка валидации")
-        .join(", ");
-    } else if (typeof data.message === "string" && data.message) {
-      message = data.message;
-    }
-
-    throw new Error(message);
-  }
-
+async function api(path, method = 'GET', body = null) {
+  const options = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) options.body = JSON.stringify(body);
+  const res = await fetch(`${API}${path}`, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Ошибка ${res.status}`);
   return data;
 }
 
-function format(value) {
-  return Number(value || 0).toLocaleString("ru-RU", {
-    maximumFractionDigits: 2,
+const fmt = (v, d = 2) => Number(v || 0).toLocaleString('ru-RU', { maximumFractionDigits: d });
+const timeFmt = (sec) => {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+const resourceName = (key) => ({
+  grain: 'Зерно', wool: 'Шерсть', wood: 'Древесина', ore: 'Руда', flour: 'Мука', cloth: 'Ткань', planks: 'Доски', metal: 'Металл'
+}[key] || key);
+const icon = (key) => `<span class="ico">${ICONS[key] || '◻️'}</span>`;
+
+function showError(error) {
+  const message = error?.message || String(error);
+  console.error(error);
+  window.alert(message);
+}
+
+function bindTabs() {
+  document.querySelectorAll('.tab').forEach((btn) => {
+    btn.onclick = () => activateTab(btn.dataset.tab);
   });
 }
 
-function formatInt(value) {
-  return Number(value || 0).toLocaleString("ru-RU", {
-    maximumFractionDigits: 0,
+function activateTab(tab) {
+  selectedTab = tab;
+  localStorage.setItem('steppe_tab', tab);
+  document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+  document.querySelectorAll('.tab-page').forEach((el) => el.classList.toggle('active', el.id === `tab-${tab}`));
+}
+
+function bindProductionFilters() {
+  document.querySelectorAll('.subtab').forEach((btn) => {
+    btn.onclick = () => {
+      productionFilter = btn.dataset.filter;
+      localStorage.setItem('steppe_production_filter', productionFilter);
+      document.querySelectorAll('.subtab').forEach((el) => el.classList.toggle('active', el.dataset.filter === productionFilter));
+      renderProduction();
+    };
   });
 }
 
-function formatTime(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds || 0)));
-  const hours = Math.floor(total / 3600);
-  const mins = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-
-  if (hours > 0) {
-    return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  }
-
-  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-}
-
-function card(html) {
-  const div = document.createElement("div");
-  div.className = "card";
-  div.innerHTML = html;
-  return div;
-}
-
-function titleizeKey(key) {
-  const map = {
-    grain: "Зерно",
-    flour: "Мука",
-    wool: "Шерсть",
-    cloth: "Ткань",
-    wood: "Древесина",
-    planks: "Доски",
-    ore: "Руда",
-    metal: "Металл",
-  };
-
-  return map[key] || key;
-}
-
-function resourceIcon(key) {
-  const map = {
-    grain: "🌾",
-    flour: "🥖",
-    wool: "🧶",
-    cloth: "🪡",
-    wood: "🪵",
-    planks: "🪚",
-    ore: "⛏️",
-    metal: "⛓️",
-  };
-
-  return map[key] || "📦";
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function getResourceAmount(resourceKey) {
-  const item = safeArray(state?.resources).find((resource) => resource.key === resourceKey);
-  return Number(item?.amount || 0);
-}
-
-function getRecipeInputKey(recipeKey) {
-  const map = {
-    mill: "grain",
-    weavery: "wool",
-    planks: "wood",
-    forge: "ore",
-  };
-
-  return map[recipeKey] || "";
-}
-
-function showAuthScreen() {
-  $("auth_block").classList.remove("hidden");
-  $("game_block").classList.add("hidden");
-}
-
-function showGameScreen() {
-  $("auth_block").classList.add("hidden");
-  $("game_block").classList.remove("hidden");
-}
-
-function fillAuthInputs() {
-  if ($("telegram_id_input")) {
-    $("telegram_id_input").value = telegramId;
-  }
-  if ($("username_input")) {
-    $("username_input").value = username;
+function getHiddenCompletedIds() {
+  try {
+    const raw = localStorage.getItem(AUTO_CLEAR_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map(Number) : []);
+  } catch {
+    return new Set();
   }
 }
 
-function renderTopBar() {
-  if (!state || !state.player) {
-    return;
-  }
-
-  $("gold_value").textContent = format(state.player.gold);
-  $("dirham_value").textContent = format(state.player.dirhams);
-  $("storage_value").textContent = `${format(state.player.storage_used)} / ${format(state.player.storage_capacity)}`;
-  $("bonus_value").textContent = `${format(state.player.total_bonus_pct)}%`;
-  $("title_value").textContent = state.player.title_name || "—";
+function setHiddenCompletedIds(set) {
+  localStorage.setItem(AUTO_CLEAR_KEY, JSON.stringify(Array.from(set)));
 }
 
-function renderQuickActionButtons() {
-  if (!state || !state.player) {
-    return;
-  }
+async function bootstrap() {
+  try {
+    safeText('boot_status', 'Проверка сервера…');
+    await api('/api/health');
 
-  const dirhamCost = format(state.player.dirham_price || 0);
-  const storageCost = format(state.player.storage_upgrade_cost || 0);
-  const mineCost = format(state.player.mine_upgrade_cost || 0);
+    const tg = window.Telegram?.WebApp || null;
+    if (tg) {
+      try {
+        tg.ready();
+        tg.expand();
+      } catch {}
+    }
 
-  const dirhamBtn = $("buy_dirham_btn");
-  const storageBtn = $("upgrade_storage_btn");
-  const mineBtn = $("upgrade_mine_btn");
-  const chestBtn = $("open_chest_btn");
-  const quickInfo = $("quick_info");
-
-  if (dirhamBtn) {
-    dirhamBtn.textContent = `💠 Купить 1 дирхам — ${dirhamCost} золота`;
-    dirhamBtn.disabled = Number(state.player.gold || 0) < Number(state.player.dirham_price || 0);
-  }
-
-  if (storageBtn) {
-    storageBtn.textContent = `📦 Улучшить склад — ${storageCost} золота`;
-    storageBtn.disabled = Number(state.player.gold || 0) < Number(state.player.storage_upgrade_cost || 0);
-  }
-
-  if (mineBtn) {
-    mineBtn.textContent = `⛏️ Улучшить шахту — ${mineCost} золота`;
-    mineBtn.disabled = Number(state.player.gold || 0) < Number(state.player.mine_upgrade_cost || 0);
-  }
-
-  const hasChestState =
-    Object.prototype.hasOwnProperty.call(state.player, "chest_available") ||
-    Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds");
-
-  if (chestBtn) {
-    if (hasChestState) {
-      const chestAvailable = Boolean(state.player.chest_available);
-      const chestSeconds = Number(state.player.chest_ready_in_seconds || 0);
-
-      if (chestAvailable) {
-        chestBtn.textContent = "🎁 Открыть сундук";
-        chestBtn.disabled = false;
-      } else {
-        chestBtn.textContent = `🎁 Сундук через ${formatTime(chestSeconds)}`;
-        chestBtn.disabled = true;
-      }
-
-      if (quickInfo) {
-        quickInfo.textContent = chestAvailable
-          ? "Сундук готов к открытию."
-          : `До открытия сундука: ${formatTime(chestSeconds)}`;
-      }
-    } else {
-      chestBtn.textContent = "🎁 Открыть сундук";
-      chestBtn.disabled = false;
-
-      if (quickInfo) {
-        quickInfo.textContent =
-          `💠 Дирхам: ${dirhamCost} золота • 📦 Склад: ${storageCost} • ⛏️ Шахта: ${mineCost}`;
+    const initData = typeof tg?.initData === 'string' ? tg.initData : '';
+    if (initData) {
+      safeText('boot_status', 'Вход через Telegram…');
+      try {
+        state = await api('/api/auth/telegram', 'POST', { init_data: initData });
+        const user = tg.initDataUnsafe?.user || null;
+        telegramId = user?.id ? String(user.id) : '';
+        username = user?.username || user?.first_name || 'Игрок';
+        localStorage.setItem('steppe_tg_id', telegramId);
+        localStorage.setItem('steppe_username', username);
+      } catch (error) {
+        console.warn('Telegram auth fallback:', error);
       }
     }
+
+    if (!state) {
+      safeText('boot_status', 'Локальный вход…');
+      telegramId = localStorage.getItem('steppe_local_id') || `local-${Math.random().toString(36).slice(2, 10)}`;
+      username = localStorage.getItem('steppe_local_name') || 'Игрок';
+      localStorage.setItem('steppe_local_id', telegramId);
+      localStorage.setItem('steppe_local_name', username);
+      localStorage.setItem('steppe_username', username);
+      state = await api('/api/auth', 'POST', { telegram_id: telegramId, username });
+    }
+
+    $('boot')?.classList.add('hidden');
+    $('app')?.classList.remove('hidden');
+    render();
+    startRefreshLoop();
+  } catch (error) {
+    console.error('BOOT ERROR:', error);
+    safeText('boot_status', 'Подключение не удалось.');
+    safeText('boot_error', error?.message || String(error));
+    $('boot_retry')?.classList.remove('hidden');
   }
+}
+
+function startRefreshLoop() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refreshState, 5000);
+}
+
+async function refreshState() {
+  if (!telegramId) return;
+  try {
+    state = await api(`/api/state/${telegramId}`);
+    render();
+  } catch (error) {
+    console.error('REFRESH ERROR:', error);
+  }
+}
+
+function render() {
+  if (!state?.player) return;
+  renderTop();
+  renderNotifications();
+  renderOverview();
+  renderProduction();
+  renderWarehouse();
+  renderMine();
+  renderCaravans();
+  renderProgress();
+  renderLeaderboard();
+  bindActions();
+  bindTabs();
+  bindProductionFilters();
+  activateTab(selectedTab);
+}
+
+function renderTop() {
+  const p = state.player;
+  safeHtml('top_stats', `
+    <div class="stat"><div class="k">${icon('gold')} Золото</div><div class="v">${fmt(p.gold)}</div></div>
+    <div class="stat"><div class="k">${icon('dirhams')} Дирхамы</div><div class="v">${fmt(p.dirhams, 0)}</div></div>
+    <div class="stat"><div class="k">${icon('storage')} Склад</div><div class="v">${fmt(p.storage_used)} / ${fmt(p.storage_capacity)}</div></div>
+    <div class="stat"><div class="k">💹 Бонус дохода</div><div class="v">${fmt(p.total_bonus_pct)}%</div></div>
+    <div class="stat"><div class="k">👑 Звание</div><div class="v">${p.title_name}</div></div>
+  `);
+}
+
+function renderNotifications() {
+  const notes = state.notifications || [];
+  safeHtml('notifications', notes.map((n) => `<div class="notice">⚠️ ${n}</div>`).join(''));
 }
 
 function renderOverview() {
-  const profile = $("profile_stats");
-  profile.innerHTML = "";
-
-  const stats = [
-    ["Имя", state.player.username],
-    ["Рейтинг", format(state.player.rank_score)],
-    ["Заработано", format(state.player.total_gold_earned)],
-    ["Потрачено", format(state.player.total_gold_spent)],
-    ["Произведено", format(state.player.total_resources_produced)],
-    ["Переработано", format(state.player.total_resources_processed)],
-    ["Караваны", formatInt(state.player.total_caravans_sent)],
-    ["Успешные", formatInt(state.player.total_caravans_success)],
-    ["Клики", formatInt(state.player.total_clicks)],
-    ["Уровень шахты", formatInt(state.player.mine_level)],
+  const p = state.player;
+  const profileItems = [
+    ['Имя', p.username],
+    ['Рейтинг', fmt(p.rank_score)],
+    ['Заработано', fmt(p.total_gold_earned)],
+    ['Потрачено', fmt(p.total_gold_spent)],
+    ['Произведено', fmt(p.total_resources_produced)],
+    ['Переработано', fmt(p.total_resources_processed)]
   ];
+  safeHtml('profile_grid', profileItems.map(([k, v]) => `
+    <div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>
+  `).join(''));
 
-  stats.forEach(([label, value]) => {
-    const div = document.createElement("div");
-    div.className = "stat";
-    div.innerHTML = `
-      <span class="label">${label}</span>
-      <span class="value">${value}</span>
+  const goal = state.active_achievements?.[0] || null;
+  safeHtml('current_goal', goal ? `
+    <div class="card">
+      <h3>🎯 ${goal.name}</h3>
+      <div class="muted">${goal.description}</div>
+      <div class="row"><span>Прогресс</span><b>${fmt(goal.current)} / ${fmt(goal.threshold)}</b></div>
+      <div class="row"><span>Бонус</span><b>+${fmt(goal.bonus_pct)}%</b></div>
+    </div>
+  ` : '<div class="hint">Все текущие цели выполнены.</div>');
+
+  safeText('open_chest_btn', p.chest_ready ? '🎁 Открыть сундук' : `🎁 Сундук через ${timeFmt(p.chest_seconds)}`);
+  safeText('buy_dirham_btn', `💠 Купить 1 дирхам — ${fmt(p.dirham_price)} золота`);
+  safeText('overview_hint', `Средний доход шахты: ${fmt(p.mine_income)} за тап`);
+}
+
+
+function sellControls(resourceKey, amount, prefix = 'sell') {
+  const inputId = `${prefix}_${resourceKey}`;
+  return `
+    <div class="btn-row">
+      <input type="number" min="1" step="1" placeholder="Количество" id="${inputId}">
+      <button class="btn primary" onclick="sellCustom('${resourceKey}', '${inputId}')">Продать</button>
+    </div>
+    <div class="hint">Доступно: ${fmt(amount)}</div>
+  `;
+}
+
+function buildingCard(b) {
+  const autoLabel = b.auto_kind === 'sell' ? 'авто-продажа' : 'авто-переработка';
+  const autoButtonLabel = b.auto_active
+    ? (b.auto_kind === 'sell' ? 'Остановить авто-продажу' : 'Остановить авто-переработку')
+    : (b.auto_kind === 'sell'
+        ? `Авто-продажа за ${b.auto_cost_dirhams} 💠`
+        : `Авто-переработка за ${b.auto_cost_dirhams} 💠`);
+
+  const saleResourceKey = b.category === 'production' ? b.resource_key : b.output_key;
+  const saleResourceAmount = b.category === 'production' ? Number(b.resource_amount || 0) : Number(b.output_amount || 0);
+
+  const main = b.category === 'production'
+    ? `
+      <div class="row"><span>Производит</span><b>${icon(b.resource_key)} ${resourceName(b.resource_key)}</b></div>
+      <div class="row"><span>Сейчас</span><b>${fmt(b.current_per_min)} / мин</b></div>
+      <div class="row"><span>На складе</span><b>${fmt(b.resource_amount)}</b></div>
+    `
+    : `
+      <div class="row"><span>Переработка</span><b>${icon(b.input_key)} ${resourceName(b.input_key)} → ${icon(b.output_key)} ${resourceName(b.output_key)}</b></div>
+      <div class="row"><span>Сейчас</span><b>${fmt(b.current_per_min)} / мин</b></div>
+      <div class="row"><span>Сырьё / товар</span><b>${fmt(b.input_amount)} / ${fmt(b.output_amount)}</b></div>
+      <div class="row"><span>К продаже</span><b>${icon(b.output_key)} ${resourceName(b.output_key)}</b></div>
     `;
-    profile.appendChild(div);
-  });
 
-  const overview = $("overview_resources");
-  overview.innerHTML = "";
-
-  safeArray(state.resources).forEach((resource) => {
-    overview.appendChild(
-      card(`
-        <h3>${resourceIcon(resource.key)} ${resource.name}</h3>
-        <div class="row"><span>На складе</span><strong>${format(resource.amount)}</strong></div>
-        <div class="row"><span>Цена</span><strong>${format(resource.market_price)}</strong></div>
-        <div class="row"><span>Тип</span><strong>${resource.kind === "raw" ? "Сырьё" : "Товар"}</strong></div>
-      `),
-    );
-  });
+  return `
+    <div class="card">
+      <h3>${icon(b.key)} ${b.name}</h3>
+      <div class="muted">${b.description}</div>
+      ${main}
+      <div class="row"><span>Уровень</span><b>${b.level}</b></div>
+      <div class="row"><span>После улучшения</span><b>${fmt(b.next_per_min)} / мин</b></div>
+      <div class="row"><span>${autoLabel}</span><b>${b.auto_active ? `работает ${timeFmt(b.auto_seconds)}` : 'выкл.'}</b></div>
+      <div class="btn-row">
+        <button class="btn" onclick="buyBuilding('${b.key}')">Улучшить за ${fmt(b.price)}</button>
+        <button class="btn ${b.auto_active ? 'primary' : ''}" onclick="toggleAutomation('${b.key}')">${autoButtonLabel}</button>
+      </div>
+      <div class="top-space">
+        ${sellControls(saleResourceKey, saleResourceAmount, `prod_${b.key}`)}
+      </div>
+    </div>
+  `;
 }
 
-function renderBuildings() {
-  const list = $("buildings_list");
-  list.innerHTML = "";
+function renderProduction() {
+  const allBuildings = Array.isArray(state.buildings) ? state.buildings : [];
+  const produced = allBuildings.filter((b) => b.category === 'production');
+  const processed = allBuildings.filter((b) => b.category !== 'production');
 
-  safeArray(state.buildings).forEach((item) => {
-    list.appendChild(
-      card(`
-        <h3>🏭 ${item.name}</h3>
-        <small>${item.description}</small>
-        <div class="row"><span>Уровень</span><strong>${item.level}</strong></div>
-        <div class="row"><span>Цена</span><strong>${format(item.price)}</strong></div>
-        <button class="primary-btn" data-building="${item.key}">Купить / улучшить</button>
-      `),
-    );
-  });
+  const visible = productionFilter === 'processing' ? processed : produced;
 
-  list.querySelectorAll("[data-building]").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`building:${btn.dataset.building}`, () => buyBuilding(btn.dataset.building).catch(showError));
-    });
-  });
+  safeHtml('production_counts', `
+    <span>Производящие: <b>${produced.length}</b></span>
+    <span>Перерабатывающие: <b>${processed.length}</b></span>
+  `);
+  safeHtml('production_list', visible.map(buildingCard).join('') || '<div class="hint">Здания не найдены.</div>');
 }
 
-function renderWorkers() {
-  const list = $("workers_list");
-  list.innerHTML = "";
+function renderWarehouse() {
+  const p = state.player;
+  const ratio = p.storage_capacity > 0 ? (p.storage_used / p.storage_capacity) * 100 : 0;
+  const percent = Math.max(0, Math.min(100, ratio));
+  safeHtml('warehouse_summary', `
+    <div class="storage-bar"><div class="storage-fill" style="width:${percent}%"></div></div>
+    <div class="hint top-space">Заполнено ${fmt(p.storage_used)} из ${fmt(p.storage_capacity)}. Улучшение склада вынесено сюда.</div>
+  `);
+  safeText('upgrade_storage_btn', `📦 Улучшить склад — ${fmt(p.storage_upgrade_cost)} золота`);
 
-  safeArray(state.workers).forEach((item) => {
-    list.appendChild(
-      card(`
-        <h3>👷 ${item.name}</h3>
-        <small>${item.description}</small>
-        <div class="row"><span>Количество</span><strong>${item.count}</strong></div>
-        <div class="row"><span>Найм</span><strong>${format(item.hire_cost)} золота</strong></div>
-        <div class="row"><span>ЗП</span><strong>${format(item.salary)} / мин</strong></div>
-        <div class="row"><span>Эффективность</span><strong>+${item.efficiency_bonus_pct}%</strong></div>
-        <button class="primary-btn" data-worker="${item.key}">Нанять</button>
-      `),
-    );
-  });
+  const raw = (state.resources || []).filter((r) => r.kind === 'raw');
+  const goods = (state.resources || []).filter((r) => r.kind !== 'raw');
+  const renderCard = (r, prefix) => `
+    <div class="card">
+      <h3>${icon(r.key)} ${r.name}</h3>
+      <div class="muted">${r.kind === 'raw' ? 'Сырьё' : 'Товар'}</div>
+      <div class="row"><span>На складе</span><b>${fmt(r.amount)}</b></div>
+      <div class="row"><span>Цена рынка</span><b>${fmt(r.market_price)} золота</b></div>
+      <div class="row"><span>Стоимость всего</span><b>${fmt(r.amount * r.market_price)}</b></div>
+      ${sellControls(r.key, Number(r.amount || 0), prefix)}
+    </div>
+  `;
 
-  list.querySelectorAll("[data-worker]").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`worker:${btn.dataset.worker}`, () => hireWorker(btn.dataset.worker).catch(showError));
-    });
-  });
+  safeHtml('warehouse_list', `
+    <div class="section-title">🧺 Сырьё</div>
+    ${raw.map((r) => renderCard(r, 'wh_raw')).join('')}
+    <div class="section-title top-space">📦 Товары</div>
+    ${goods.map((r) => renderCard(r, 'wh_goods')).join('')}
+  `);
 }
 
-function renderTrade() {
-  const sellList = $("sell_list");
-  const caravanSelect = $("caravan_resource_select");
+function renderMine() {
+  const p = state.player;
+  safeHtml('mine_info', `
+    <div class="grid mine-grid">
+      <div class="card">
+        <h3>${icon('mine')} Шахта</h3>
+        <div class="muted">Увеличивает силу крита и слегка повышает базовый доход.</div>
+        <div class="row"><span>Уровень</span><b>${p.mine_level}</b></div>
+        <div class="row"><span>Базовый тап</span><b>${fmt(p.mine_base_tap)}</b></div>
+        <div class="row"><span>Сила крита</span><b>x${fmt(p.mine_crit_multiplier)}</b></div>
+        <button class="btn" onclick="mineUpgrade('mine')">Улучшить шахту за ${fmt(p.mine_upgrade_cost)}</button>
+      </div>
+      <div class="card">
+        <h3>${icon('pickaxe')} Кирка</h3>
+        <div class="muted">Даёт только шанс критического удара.</div>
+        <div class="row"><span>Уровень</span><b>${p.pickaxe_level}</b></div>
+        <div class="row"><span>Шанс крита</span><b>${fmt(p.mine_crit_chance)}%</b></div>
+        <div class="row"><span>Средний тап</span><b>${fmt(p.mine_income)}</b></div>
+        <button class="btn" onclick="mineUpgrade('pickaxe')">Улучшить кирку за ${fmt(p.pickaxe_upgrade_cost)}</button>
+      </div>
+    </div>
+  `);
+}
 
-  sellList.innerHTML = "";
-  caravanSelect.innerHTML = "";
+function updateCaravanPreview() {
+  const routes = state?.caravan_routes || [];
+  const routeKey = $('route_select')?.value || '';
+  const guardLevel = $('guard_select')?.value || 'none';
+  const resourceKey = $('resource_select')?.value || '';
+  const amount = Number($('caravan_amount')?.value || 0);
 
-  const availableResources = safeArray(state.resources).filter((resource) => Number(resource.amount) > 0);
-
-  if (availableResources.length === 0) {
-    sellList.appendChild(card(`<small>Пока нечего продавать. Сначала добудь или произведи ресурсы.</small>`));
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Нет ресурсов";
-    caravanSelect.appendChild(option);
+  const route = routes.find((r) => r.key === routeKey);
+  if (!route) {
+    safeText('caravan_preview', 'Выбери маршрут, охрану и груз.');
     return;
   }
 
-  availableResources.forEach((item) => {
-    const sellAmount = Math.max(1, Math.floor(Number(item.amount)));
+  const guard = GUARD_META[guardLevel] || GUARD_META.none;
+  const baseRisk = Number(route.risk_percent || 0);
+  const reducedBy = Number(guard.risk_reduction || 0);
+  const finalRisk = Math.max(0, baseRisk - reducedBy);
+  const cargoText = resourceKey ? `${resourceName(resourceKey)}${amount > 0 ? ` (${fmt(amount)})` : ''}` : '—';
 
-    sellList.appendChild(
-      card(`
-        <h3>${resourceIcon(item.key)} ${item.name}</h3>
-        <div class="row"><span>Есть</span><strong>${format(item.amount)}</strong></div>
-        <div class="row"><span>Цена</span><strong>${format(item.market_price)}</strong></div>
-        <button class="primary-btn" data-resource="${item.key}" data-amount="${sellAmount}">Продать ${sellAmount}</button>
-      `),
-    );
-
-    const option = document.createElement("option");
-    option.value = item.key;
-    option.textContent = `${item.name} (${format(item.amount)})`;
-    caravanSelect.appendChild(option);
-  });
-
-  sellList.querySelectorAll("[data-resource]").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`sell:${btn.dataset.resource}`, () =>
-        sellResource(btn.dataset.resource, Number(btn.dataset.amount)).catch(showError),
-      );
-    });
-  });
+  safeHtml('caravan_preview', `
+    <div class="row"><span>Груз</span><b>${cargoText}</b></div>
+    <div class="row"><span>Охрана</span><b>${guard.name}${guard.cost_dirhams > 0 ? ` — ${guard.cost_dirhams} 💠` : ''}</b></div>
+    <div class="row"><span>Время</span><b>${timeFmt(route.duration_seconds || 0)}</b></div>
+    <div class="row"><span>Базовый риск</span><b>${fmt(baseRisk)}%</b></div>
+    <div class="row"><span>Снижение от охраны</span><b>-${fmt(reducedBy)}%</b></div>
+    <div class="row"><span>Итоговый риск</span><b>${fmt(finalRisk)}%</b></div>
+    <div class="row"><span>Бонус маршрута</span><b>+${fmt((route.profit_bonus || 0) * 100)}%</b></div>
+  `);
 }
 
-function formatCargo(cargo) {
-  if (!cargo || typeof cargo !== "object") {
-    return "—";
-  }
-
-  const parts = Object.entries(cargo).map(([key, value]) => `${resourceIcon(key)} ${titleizeKey(key)}: ${format(value)}`);
-  return parts.length ? parts.join(", ") : "—";
+function renderCaravanCard(c, completed = false) {
+  const status = c.success ? 'успех' : 'провал';
+  return `
+    <div class="card">
+      <h3>🐫 ${c.route_name}</h3>
+      <div class="row"><span>Груз</span><b>${Object.entries(c.cargo || {}).map(([k, v]) => `${resourceName(k)}: ${fmt(v)}`).join(', ')}</b></div>
+      <div class="row"><span>Охрана</span><b>${c.guard_name || '—'}</b></div>
+      <div class="row"><span>Риск</span><b>${fmt(c.risk_percent)}%</b></div>
+      <div class="row"><span>Статус</span><b>${completed ? status : 'в пути'}</b></div>
+      <div class="row">
+        <span>${completed ? 'Результат' : 'Осталось'}</span>
+        <b ${completed ? '' : `id="caravan_timer_${c.id}" data-seconds="${c.remaining_seconds}"`}>
+          ${completed ? `${fmt(c.result_gold)} золота` : timeFmt(c.remaining_seconds)}
+        </b>
+      </div>
+      ${completed && c.event_text ? `<div class="hint top-space">${c.event_text}</div>` : ''}
+      ${!completed && c.remaining_seconds <= 0 ? `<button class="btn primary" onclick="claimCaravan(${c.id})">Забрать</button>` : ''}
+    </div>
+  `;
 }
 
 function renderCaravans() {
-  const routeSelect = $("route_select");
-  const list = $("caravans_list");
+  const routes = state.caravan_routes || [];
+  const caravans = state.active_caravans || [];
+  const hiddenCompleted = getHiddenCompletedIds();
+  const active = caravans.filter((c) => !c.resolved);
+  const completed = caravans.filter((c) => c.resolved && !hiddenCompleted.has(Number(c.id)));
 
-  routeSelect.innerHTML = "";
-  list.innerHTML = "";
+  const prevRoute = $('route_select')?.value || '';
+  const prevGuard = $('guard_select')?.value || 'none';
+  const prevResource = $('resource_select')?.value || '';
 
-  safeArray(state.caravan_routes).forEach((route) => {
-    const option = document.createElement("option");
-    option.value = route.key;
-    option.textContent = `${route.name} • ${Math.round(route.duration_seconds / 60)} мин • +${Math.round(route.profit_bonus * 100)}%`;
-    routeSelect.appendChild(option);
-  });
+  safeHtml('route_select', routes.map((r) => `<option value="${r.key}">${r.name}</option>`).join(''));
+  if (routes.some((r) => r.key === prevRoute)) $('route_select').value = prevRoute;
 
-  if (!safeArray(state.active_caravans).length) {
-    list.appendChild(card(`<small>Активных караванов пока нет.</small>`));
-    return;
+  safeHtml('guard_select', Object.entries(GUARD_META).map(([k, g]) => `<option value="${k}">${g.name}${g.cost_dirhams > 0 ? ` — ${g.cost_dirhams} 💠` : ''}</option>`).join(''));
+  if (Object.keys(GUARD_META).includes(prevGuard)) $('guard_select').value = prevGuard;
+
+  const availableResources = (state.resources || []).filter((r) => Number(r.amount) > 0);
+  safeHtml('resource_select', availableResources.map((r) => `<option value="${r.key}">${resourceName(r.key)} (${fmt(r.amount)})</option>`).join(''));
+  if (availableResources.some((r) => r.key === prevResource)) $('resource_select').value = prevResource;
+
+  safeText('caravan_slots', `${state.player.active_caravans_count}/${state.player.max_active_caravans}`);
+  safeHtml('caravan_active', active.length ? active.map((c) => renderCaravanCard(c, false)).join('') : '<div class="hint">Активных караванов нет.</div>');
+  safeHtml('caravan_completed', completed.length ? completed.map((c) => renderCaravanCard(c, true)).join('') : '<div class="hint">Завершённых караванов нет.</div>');
+
+  updateCaravanPreview();
+
+  $('route_select').onchange = updateCaravanPreview;
+  $('guard_select').onchange = updateCaravanPreview;
+  $('resource_select').onchange = updateCaravanPreview;
+  $('caravan_amount').oninput = updateCaravanPreview;
+
+  const clearBtn = $('clear_completed_caravans_btn');
+  if (clearBtn) {
+    clearBtn.disabled = completed.length === 0;
+    clearBtn.onclick = () => {
+      const next = getHiddenCompletedIds();
+      completed.forEach((c) => next.add(Number(c.id)));
+      setHiddenCompletedIds(next);
+      renderCaravans();
+    };
   }
-
-  safeArray(state.active_caravans).forEach((caravan) => {
-    const status = caravan.resolved
-      ? caravan.success
-        ? '<span class="ok">Успех</span>'
-        : '<span class="bad">Провал</span>'
-      : '<span class="warn">В пути</span>';
-
-    const actionBlock = !caravan.resolved
-      ? caravan.remaining_seconds > 0
-        ? `<button class="primary-btn" disabled>В пути: ${formatTime(caravan.remaining_seconds)}</button>`
-        : `<button class="primary-btn claim-btn" data-caravan-id="${caravan.id}">Забрать награду</button>`
-      : `<small>Награда: ${format(caravan.result_gold)} золота, ${caravan.result_dirhams} дирхамов</small>`;
-
-    list.appendChild(
-      card(`
-        <h3>🐫 ${caravan.route_name || caravan.route_key}</h3>
-        <div class="row"><span>Статус</span><strong>${status}</strong></div>
-        <div class="row"><span>Охрана</span><strong>${caravan.guard_name || caravan.guard_level}</strong></div>
-        <div class="row"><span>Груз</span><strong>${formatCargo(caravan.cargo)}</strong></div>
-        <div class="row"><span>Риск</span><strong>${format(caravan.risk_percent)}%</strong></div>
-        <div class="row"><span>Осталось</span><strong>${formatTime(caravan.remaining_seconds)}</strong></div>
-        <div class="row"><span>Потенциал</span><strong>${format(caravan.expected_profit)}</strong></div>
-        ${caravan.event_text ? `<div class="row"><span>Событие</span><strong>${caravan.event_text}</strong></div>` : ""}
-        ${actionBlock}
-      `),
-    );
-  });
-
-  list.querySelectorAll(".claim-btn").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`claim:${btn.dataset.caravanId}`, () => claimCaravan(btn.dataset.caravanId).catch(showError));
-    });
-  });
 }
 
-function renderAchievements() {
-  const achievementsList = $("achievements_list");
-  const titlesList = $("titles_list");
+function renderProgress() {
+  safeHtml('active_achievements', (state.active_achievements || []).map((a) => `
+    <div class="card"><h3>${a.name}</h3><div class="muted">${a.description}</div><div class="row"><span>Прогресс</span><b>${fmt(a.current)} / ${fmt(a.threshold)}</b></div></div>
+  `).join(''));
 
-  achievementsList.innerHTML = "";
-  titlesList.innerHTML = "";
-
-  safeArray(state.achievements).forEach((item) => {
-    achievementsList.appendChild(
-      card(`
-        <h3>🏆 ${item.name}</h3>
-        <small>${item.description}</small>
-        <div class="row"><span>Прогресс</span><strong>${format(item.current)} / ${format(item.threshold)}</strong></div>
-        <div class="row"><span>Бонус к общему доходу</span><strong>+${item.bonus_pct}%</strong></div>
-        <div class="progress"><span style="width:${item.progress_pct}%"></span></div>
-        <small>${item.unlocked ? "Получено" : "В процессе"}</small>
-      `),
-    );
-  });
-
-  safeArray(state.titles).forEach((item) => {
-    titlesList.appendChild(
-      card(`
-        <h3>👑 ${item.name}</h3>
-        <div class="row"><span>Требование</span><strong>${format(item.score)}</strong></div>
-        <div class="row"><span>Бонус к общему доходу</span><strong>+${item.bonus_pct}%</strong></div>
-        <div class="progress"><span style="width:${item.progress_pct}%"></span></div>
-        <small>${item.unlocked ? "Открыто" : "Не открыто"}</small>
-      `),
-    );
-  });
+  safeHtml('completed_achievements', (state.completed_achievements || []).map((a) => `
+    <div class="card"><h3>✅ ${a.name}</h3><div class="muted">+${fmt(a.bonus_pct)}% дохода</div></div>
+  `).join('') || '<div class="hint">Пока ничего не открыто.</div>');
 }
 
 function renderLeaderboard() {
-  const list = $("leaderboard_list");
-  list.innerHTML = "";
-
-  safeArray(state.leaderboard).forEach((row) => {
-    list.appendChild(
-      card(`
-        <h3>📈 #${row.rank} — ${row.username}</h3>
-        <div class="row"><span>Заработано</span><strong>${format(row.gold_earned)}</strong></div>
-        <div class="row"><span>Звание</span><strong>${row.title_name}</strong></div>
-      `),
-    );
-  });
+  safeHtml('leaderboard', (state.leaderboard || []).map((x) => `
+    <div class="card"><div class="row"><b>#${x.rank} ${x.username}</b><span>${x.title_name}</span></div><div class="muted">${fmt(x.gold_earned)} золота</div></div>
+  `).join(''));
 }
 
-function renderAll() {
-  if (!state) {
-    return;
-  }
-
-  renderTopBar();
-  renderQuickActionButtons();
-  renderOverview();
-  renderBuildings();
-  renderWorkers();
-  renderTrade();
-  renderCaravans();
-  renderAchievements();
-  renderLeaderboard();
+function bindActions() {
+  $('open_chest_btn').onclick = () => doAction('/api/chest/open', { telegram_id: telegramId });
+  $('buy_dirham_btn').onclick = () => doAction('/api/dirham/buy', { telegram_id: telegramId });
+  $('upgrade_storage_btn').onclick = () => doAction('/api/storage/upgrade', { telegram_id: telegramId });
+  $('send_caravan_btn').onclick = sendCaravan;
+  $('mine_click_btn').onclick = mineClick;
 }
 
-async function loadState() {
-  if (!telegramId) {
-    return;
-  }
-
-  state = await api(`/api/state/${telegramId}`);
-  showGameScreen();
-  renderAll();
-}
-
-async function authManual() {
-  telegramId = $("telegram_id_input").value.trim();
-  username = $("username_input").value.trim() || "Игрок";
-
-  if (!telegramId) {
-    throw new Error("Введите Telegram ID");
-  }
-
-  localStorage.setItem("steppe_tg_id", telegramId);
-  localStorage.setItem("steppe_username", username);
-
-  state = await api("/api/auth", "POST", {
-    telegram_id: telegramId,
-    username,
-  });
-
-  showGameScreen();
-  renderAll();
-}
-
-async function authTelegram(initData) {
-  state = await api("/api/auth/telegram", "POST", {
-    init_data: initData,
-  });
-
-  telegramId = String(state.player.telegram_id || "");
-  username = state.player.username || "Игрок";
-
-  localStorage.setItem("steppe_tg_id", telegramId);
-  localStorage.setItem("steppe_username", username);
-
-  showGameScreen();
-  renderAll();
-}
-
-async function bootTelegramAuth() {
-  const tg = window.Telegram?.WebApp;
-
-  if (!tg) {
-    fillAuthInputs();
-
-    if (telegramId) {
-      await loadState();
-    } else {
-      showAuthScreen();
-    }
-
-    return;
-  }
-
+async function doAction(path, body) {
   try {
-    tg.ready();
-    tg.expand();
-
-    if (typeof tg.disableVerticalSwipes === "function") {
-      tg.disableVerticalSwipes();
-    }
-  } catch (_) {}
-
-  const initData = tg.initData || "";
-  const user = tg.initDataUnsafe?.user || null;
-
-  if (!initData || !user?.id) {
-    fillAuthInputs();
-
-    if (telegramId) {
-      await loadState();
-    } else {
-      showAuthScreen();
-    }
-
-    return;
+    state = await api(path, 'POST', body);
+    render();
+  } catch (err) {
+    showError(err);
   }
-
-  isTelegramMode = true;
-  await authTelegram(initData);
 }
-
-async function buyBuilding(buildingKey) {
-  state = await api("/api/building/buy", "POST", {
-    telegram_id: telegramId,
-    building_key: buildingKey,
-  });
-  renderAll();
+async function buyBuilding(key) { await doAction('/api/building/buy', { telegram_id: telegramId, building_key: key }); }
+async function toggleAutomation(key) { await doAction('/api/building/automation', { telegram_id: telegramId, building_key: key }); }
+async function sell(key, amount) { if (amount <= 0) return; await doAction('/api/sell', { telegram_id: telegramId, resource_key: key, amount: Number(amount) }); }
+async function sellCustom(key, inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return alert('Поле количества не найдено');
+  const amount = Number(input.value || 0);
+  if (!amount || amount <= 0) return alert('Укажи количество');
+  await doAction('/api/sell', { telegram_id: telegramId, resource_key: key, amount: Number(amount) });
+  input.value = '';
 }
-
-async function hireWorker(workerKey) {
-  state = await api("/api/worker/hire", "POST", {
-    telegram_id: telegramId,
-    worker_key: workerKey,
-  });
-  renderAll();
-}
-
-async function upgradeWorker(upgradeKey) {
-  state = await api("/api/worker/upgrade", "POST", {
-    telegram_id: telegramId,
-    upgrade_key: upgradeKey,
-  });
-  renderAll();
-}
-
-async function processRecipe(recipeKey) {
-  const inputKey = getRecipeInputKey(recipeKey);
-
-  if (inputKey && getResourceAmount(inputKey) < 10) {
-    throw new Error("Недостаточно сырья");
-  }
-
-  state = await api("/api/process", "POST", {
-    telegram_id: telegramId,
-    recipe_key: recipeKey,
-    amount: 10,
-  });
-  renderAll();
-}
-
-async function sellResource(resourceKey, amount) {
-  if (!amount || amount <= 0) {
-    throw new Error("Некорректное количество");
-  }
-
-  if (getResourceAmount(resourceKey) < amount) {
-    throw new Error("Недостаточно ресурса");
-  }
-
-  state = await api("/api/sell", "POST", {
-    telegram_id: telegramId,
-    resource_key: resourceKey,
-    amount,
-  });
-  renderAll();
-}
-
-async function buyDirham() {
-  state = await api("/api/dirham/buy", "POST", {
-    telegram_id: telegramId,
-  });
-  renderAll();
-}
-
-async function upgradeStorage() {
-  state = await api("/api/storage/upgrade", "POST", {
-    telegram_id: telegramId,
-  });
-  renderAll();
-}
-
+async function mineUpgrade(type) { await doAction('/api/mine/upgrade', { telegram_id: telegramId, upgrade_type: type }); }
 async function mineClick() {
-  state = await api("/api/mine/click", "POST", {
-    telegram_id: telegramId,
-  });
-  renderTopBar();
-  renderOverview();
+  try {
+    state = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
+    render();
+  } catch (err) {
+    showError(err);
+  }
 }
-
-async function upgradeMine() {
-  state = await api("/api/mine/upgrade", "POST", {
-    telegram_id: telegramId,
-  });
-  renderAll();
-}
-
 async function sendCaravan() {
-  const routeKey = $("route_select").value;
-  const guardLevel = $("guard_select").value;
-  const resourceKey = $("caravan_resource_select").value;
-  const amount = Number($("caravan_amount_input").value || "0");
-
-  if (!routeKey) {
-    throw new Error("Выбери маршрут");
-  }
-
-  if (!resourceKey) {
-    throw new Error("Выбери ресурс");
-  }
-
-  if (!amount || amount <= 0) {
-    throw new Error("Укажи количество больше 0");
-  }
-
-  if (getResourceAmount(resourceKey) < amount) {
-    throw new Error("Недостаточно ресурса для каравана");
-  }
-
-  state = await api("/api/caravan/send", "POST", {
-    telegram_id: telegramId,
-    route_key: routeKey,
-    guard_level: guardLevel,
-    resource_key: resourceKey,
-    amount,
-  });
-
-  renderAll();
+  const route_key = $('route_select').value;
+  const guard_level = $('guard_select').value;
+  const resource_key = $('resource_select').value;
+  const amount = Number($('caravan_amount').value || 0);
+  if (!amount) return alert('Укажи количество');
+  await doAction('/api/caravan/send', { telegram_id: telegramId, route_key, guard_level, resource_key, amount });
+  $('caravan_amount').value = '';
+  updateCaravanPreview();
 }
-
-async function claimCaravan(id) {
-  if (!id) {
-    throw new Error("Не найден ID каравана");
-  }
-
-  state = await api("/api/caravan/claim", "POST", {
-    telegram_id: telegramId,
-    caravan_id: Number(id),
-  });
-  renderAll();
-}
-
-async function openChest() {
-  const hasChestState =
-    state &&
-    state.player &&
-    (Object.prototype.hasOwnProperty.call(state.player, "chest_available") ||
-      Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds"));
-
-  if (hasChestState && !state.player.chest_available) {
-    throw new Error(`Сундук ещё не готов: ${formatTime(state.player.chest_ready_in_seconds || 0)}`);
-  }
-
-  state = await api("/api/chest/open", "POST", {
-    telegram_id: telegramId,
-  });
-  renderAll();
-}
-
-function showError(error) {
-  const now = Date.now();
-
-  if (now - lastErrorAt < 1200) {
-    return;
-  }
-
-  lastErrorAt = now;
-  alert(error.message || "Ошибка");
-}
-
-function bindStaticButtons() {
-  addFastHandler($("auth_btn"), () => {
-    withLock("auth", () => authManual().catch(showError));
-  });
-
-  addFastHandler($("buy_dirham_btn"), () => {
-    withLock("dirham", () => buyDirham().catch(showError));
-  });
-
-  addFastHandler($("upgrade_storage_btn"), () => {
-    withLock("storage", () => upgradeStorage().catch(showError));
-  });
-
-  addFastHandler($("open_chest_btn"), () => {
-    withLock("chest", () => openChest().catch(showError));
-  });
-
-  addFastHandler($("upgrade_mine_btn"), () => {
-    withLock("mine_upgrade", () => upgradeMine().catch(showError));
-  });
-
-  addFastHandler($("mine_click_btn"), () => {
-    withLock("mine_click", () => mineClick().catch(showError));
-  });
-
-  addFastHandler($("send_caravan_btn"), () => {
-    withLock("send_caravan", () => sendCaravan().catch(showError));
-  });
-
-  document.querySelectorAll(".process-btn").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`process:${btn.dataset.recipe}`, () => processRecipe(btn.dataset.recipe).catch(showError));
-    });
-  });
-
-  document.querySelectorAll(".worker-upgrade-btn").forEach((btn) => {
-    addFastHandler(btn, () => {
-      withLock(`worker_upgrade:${btn.dataset.upgrade}`, () => upgradeWorker(btn.dataset.upgrade).catch(showError));
-    });
-  });
-}
-
-function startChestTicker() {
-  if (chestTickerStarted) {
-    return;
-  }
-
-  chestTickerStarted = true;
-
-  setInterval(() => {
-    if (!state || !state.player) {
-      return;
-    }
-
-    if (
-      Object.prototype.hasOwnProperty.call(state.player, "chest_available") &&
-      Object.prototype.hasOwnProperty.call(state.player, "chest_ready_in_seconds") &&
-      !state.player.chest_available &&
-      Number(state.player.chest_ready_in_seconds) > 0
-    ) {
-      state.player.chest_ready_in_seconds -= 1;
-
-      if (state.player.chest_ready_in_seconds <= 0) {
-        state.player.chest_ready_in_seconds = 0;
-        state.player.chest_available = true;
-      }
-
-      renderQuickActionButtons();
-    }
-  }, 1000);
-}
-
-bindStaticButtons();
-startChestTicker();
+async function claimCaravan(id) { await doAction('/api/caravan/claim', { telegram_id: telegramId, caravan_id: id }); }
 
 setInterval(() => {
-  if (!telegramId) {
-    return;
-  }
+  document.querySelectorAll('[id^="caravan_timer_"]').forEach((el) => {
+    let sec = Number(el.dataset.seconds || 0);
+    if (sec <= 0) return;
+    sec -= 1;
+    el.dataset.seconds = sec;
+    el.textContent = timeFmt(sec);
+  });
+}, 1000);
 
-  loadState().catch(() => {});
-}, 5000);
-
-fillAuthInputs();
-bootTelegramAuth().catch(showError);
+bindTabs();
+activateTab(selectedTab);
+bootstrap();
+$('boot_retry').onclick = bootstrap;

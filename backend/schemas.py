@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +13,11 @@ class TelegramAuthRequest(BaseModel):
 
 
 class BuildingActionRequest(BaseModel):
+    telegram_id: str
+    building_key: str
+
+
+class BuildingAutomationRequest(BaseModel):
     telegram_id: str
     building_key: str
 
@@ -56,6 +58,7 @@ class MineClickRequest(BaseModel):
 
 class MineUpgradeRequest(BaseModel):
     telegram_id: str
+    upgrade_type: str = "mine"
 
 
 class CaravanSendRequest(BaseModel):
@@ -73,41 +76,3 @@ class CaravanClaimRequest(BaseModel):
 
 class ChestOpenRequest(BaseModel):
     telegram_id: str
-
-
-class ActionResponse(BaseModel):
-    ok: bool = True
-    message: str
-    state: dict[str, Any]
-
-
-class PlayerSummary(BaseModel):
-    telegram_id: str
-    username: str
-    gold: float
-    dirhams: int
-    title_key: str
-    title_name: str
-    rank_score: float
-    storage_level: int
-    storage_capacity: float
-    storage_used: float
-    total_bonus_pct: float
-    mine_level: int
-
-    model_config = {"from_attributes": True}
-
-
-class StateResponse(BaseModel):
-    player: dict[str, Any]
-    buildings: list[dict[str, Any]]
-    workers: list[dict[str, Any]]
-    resources: list[dict[str, Any]]
-    caravan_routes: list[dict[str, Any]]
-    active_caravans: list[dict[str, Any]]
-    achievements: list[dict[str, Any]]
-    titles: list[dict[str, Any]]
-    leaderboard: list[dict[str, Any]]
-    market_prices: dict[str, float]
-    server_time: datetime
-    tooltips: dict[str, str]

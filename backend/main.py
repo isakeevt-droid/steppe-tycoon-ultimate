@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
@@ -28,11 +29,13 @@ from .logic import (
     sell_resource,
     send_caravan,
     storage_upgrade,
+    toggle_building_automation,
     upgrade_worker,
 )
 from .schemas import (
     AuthRequest,
     BuildingActionRequest,
+    BuildingAutomationRequest,
     CaravanClaimRequest,
     CaravanSendRequest,
     ChestOpenRequest,
@@ -49,68 +52,51 @@ from .schemas import (
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Steppe Tycoon", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def _safe_add_column(table: str, col_sql: str) -> None:
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_sql}"))
+    except Exception:
+        pass
+
+
+_safe_add_column("players", "mine_pickaxe_level INTEGER DEFAULT 0")
+_safe_add_column("player_buildings", "auto_mode VARCHAR(16) DEFAULT 'off'")
+_safe_add_column("player_buildings", "auto_until DATETIME")
+
+app = FastAPI(title="Steppe Tycoon", version="7.4.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
-
 app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
 
 
 def _validate_telegram_init_data(init_data: str) -> dict:
     if not init_data:
         raise HTTPException(status_code=400, detail="Пустые Telegram init data")
-
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not bot_token:
-        raise HTTPException(
-            status_code=500,
-            detail="На сервере не задан TELEGRAM_BOT_TOKEN",
-        )
-
+        raise HTTPException(status_code=500, detail="На сервере не задан TELEGRAM_BOT_TOKEN")
     pairs = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = pairs.pop("hash", None)
-
     if not received_hash:
         raise HTTPException(status_code=400, detail="Отсутствует hash в init data")
-
     data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(pairs.items()))
-
-    secret_key = hmac.new(
-        key=b"WebAppData",
-        msg=bot_token.encode("utf-8"),
-        digestmod=hashlib.sha256,
-    ).digest()
-
-    calculated_hash = hmac.new(
-        key=secret_key,
-        msg=data_check_string.encode("utf-8"),
-        digestmod=hashlib.sha256,
-    ).hexdigest()
-
+    secret_key = hmac.new(key=b"WebAppData", msg=bot_token.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    calculated_hash = hmac.new(key=secret_key, msg=data_check_string.encode("utf-8"), digestmod=hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calculated_hash, received_hash):
         raise HTTPException(status_code=401, detail="Невалидные Telegram init data")
-
     user_raw = pairs.get("user")
     if not user_raw:
         raise HTTPException(status_code=400, detail="В init data нет user")
-
     try:
         user_data = json.loads(user_raw)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Некорректный user в init data") from exc
-
     if "id" not in user_data:
         raise HTTPException(status_code=400, detail="В Telegram user отсутствует id")
-
     return user_data
 
 
@@ -128,15 +114,8 @@ def auth(payload: AuthRequest, db: Session = Depends(get_db)) -> dict:
 @app.post("/api/auth/telegram")
 def auth_telegram(payload: TelegramAuthRequest, db: Session = Depends(get_db)) -> dict:
     user_data = _validate_telegram_init_data(payload.init_data)
-
     telegram_id = str(user_data["id"])
-    username = (
-        user_data.get("username")
-        or user_data.get("first_name")
-        or user_data.get("last_name")
-        or "Игрок"
-    )
-
+    username = user_data.get("username") or user_data.get("first_name") or user_data.get("last_name") or "Игрок"
     player = get_or_create_player(db, telegram_id, username)
     return make_state(db, player.telegram_id)
 
@@ -149,6 +128,11 @@ def state(telegram_id: str, db: Session = Depends(get_db)) -> dict:
 @app.post("/api/building/buy")
 def api_buy_building(payload: BuildingActionRequest, db: Session = Depends(get_db)) -> dict:
     return buy_building(db, payload.telegram_id, payload.building_key)
+
+
+@app.post("/api/building/automation")
+def api_building_automation(payload: BuildingAutomationRequest, db: Session = Depends(get_db)) -> dict:
+    return toggle_building_automation(db, payload.telegram_id, payload.building_key)
 
 
 @app.post("/api/worker/hire")
@@ -188,19 +172,12 @@ def api_mine_click(payload: MineClickRequest, db: Session = Depends(get_db)) -> 
 
 @app.post("/api/mine/upgrade")
 def api_mine_upgrade(payload: MineUpgradeRequest, db: Session = Depends(get_db)) -> dict:
-    return mine_upgrade(db, payload.telegram_id)
+    return mine_upgrade(db, payload.telegram_id, payload.upgrade_type)
 
 
 @app.post("/api/caravan/send")
 def api_send_caravan(payload: CaravanSendRequest, db: Session = Depends(get_db)) -> dict:
-    return send_caravan(
-        db,
-        payload.telegram_id,
-        payload.route_key,
-        payload.guard_level,
-        payload.resource_key,
-        payload.amount,
-    )
+    return send_caravan(db, payload.telegram_id, payload.route_key, payload.guard_level, payload.resource_key, payload.amount)
 
 
 @app.post("/api/caravan/claim")

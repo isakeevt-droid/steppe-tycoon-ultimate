@@ -1,11 +1,9 @@
-
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from math import floor
+from datetime import datetime
 import random
 
-from .content import BUILDINGS, WORKERS, RESOURCES, PROCESSING_RECIPES, TITLES, SETTINGS
+from .content import BUILDINGS, WORKERS, RESOURCES, TITLES, SETTINGS
 
 
 def now_utc() -> datetime:
@@ -52,13 +50,7 @@ def calculate_global_bonus_pct(achievement_bonus_pct: float, title_bonus_pct: fl
     return (achievement_bonus_pct + title_bonus_pct) / 100.0
 
 
-def calculate_building_output_per_second(
-    building_key: str,
-    level: int,
-    worker_bonus: float,
-    global_bonus: float,
-    payroll_ok: bool,
-) -> float:
+def calculate_building_output_per_second(building_key: str, level: int, worker_bonus: float, global_bonus: float, payroll_ok: bool) -> float:
     if level <= 0:
         return 0.0
     item = BUILDINGS[building_key]
@@ -67,6 +59,13 @@ def calculate_building_output_per_second(
     penalty = 1.0 if payroll_ok else 0.5
     per_cycle = item["base_output"] * level * (1 + worker_bonus) * (1 + global_bonus) * penalty
     return per_cycle / item["cycle_seconds"]
+
+
+def calculate_processing_output_per_second(level: int, batch_size: float, worker_bonus: float, global_bonus: float, payroll_ok: bool) -> float:
+    if level <= 0:
+        return 0.0
+    penalty = 1.0 if payroll_ok else 0.5
+    return (batch_size * level * (1 + worker_bonus) * (1 + global_bonus) * penalty) / 120.0
 
 
 def calculate_market_price(resource_key: str, market_seed: int) -> float:
@@ -116,10 +115,30 @@ def calculate_dirham_buy_price(bought_today: int) -> float:
     return SETTINGS["dirham_price_base"] * (SETTINGS["dirham_price_growth"] ** bought_today)
 
 
-def calculate_mine_click_income(level: int, achievement_bonus: float, title_bonus: float) -> float:
+def calculate_mine_crit_chance(pickaxe_level: int) -> float:
+    return min(20.0, pickaxe_level * 1.5)
+
+
+def calculate_mine_crit_multiplier(mine_level: int) -> float:
+    return 1.5 + (mine_level - 1) * 0.06
+
+
+def calculate_mine_click_income(level: int, pickaxe_level: int, achievement_bonus: float, title_bonus: float) -> tuple[float, float, float, float]:
     global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus)
-    return SETTINGS["mine_click_base"] * (1 + (level - 1) * 0.05) * (1 + global_bonus)
+    base_tap = SETTINGS["mine_click_base"] * (1 + (level - 1) * 0.03) * (1 + global_bonus)
+    crit_chance = calculate_mine_crit_chance(pickaxe_level)
+    crit_multiplier = calculate_mine_crit_multiplier(level)
+    average_tap = base_tap * (1 + (crit_chance / 100.0) * (crit_multiplier - 1))
+    return round(base_tap, 2), round(average_tap, 2), round(crit_chance, 2), round(crit_multiplier, 2)
 
 
 def calculate_mine_upgrade_cost(level: int) -> float:
     return SETTINGS["mine_upgrade_cost_base"] * (SETTINGS["mine_upgrade_cost_growth"] ** (level - 1))
+
+
+def calculate_pickaxe_upgrade_cost(level: int) -> float:
+    return SETTINGS["mine_pickaxe_cost_base"] * (SETTINGS["mine_pickaxe_cost_growth"] ** level)
+
+
+def calculate_auto_activation_cost(building_level: int) -> int:
+    return max(1, 1 + (building_level // 10))

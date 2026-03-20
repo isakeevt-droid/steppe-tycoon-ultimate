@@ -22,6 +22,7 @@ class Player(Base):
 
     storage_level: Mapped[int] = mapped_column(Integer, default=1)
     manual_mine_level: Mapped[int] = mapped_column(Integer, default=1)
+    mine_pickaxe_level: Mapped[int] = mapped_column(Integer, default=0)
 
     total_gold_earned: Mapped[float] = mapped_column(Float, default=0.0)
     total_gold_spent: Mapped[float] = mapped_column(Float, default=0.0)
@@ -32,7 +33,7 @@ class Player(Base):
     total_caravan_profit: Mapped[float] = mapped_column(Float, default=0.0)
     total_clicks: Mapped[int] = mapped_column(Integer, default=0)
     total_dirhams_bought: Mapped[int] = mapped_column(Integer, default=0)
-    total_dirhams_spent: Mapped[int] = mapped_column(Integer, default=0)
+    total_dirhams_spent: Mapped[int] = mapped_column(Float, default=0.0)
 
     dirhams_bought_today: Mapped[int] = mapped_column(Integer, default=0)
     dirham_day_key: Mapped[str] = mapped_column(String(16), default="")
@@ -41,32 +42,13 @@ class Player(Base):
     free_chest_ready_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    buildings: Mapped[list["PlayerBuilding"]] = relationship(
-        back_populates="player",
-        cascade="all, delete-orphan",
-    )
-    workers: Mapped[list["PlayerWorker"]] = relationship(
-        back_populates="player",
-        cascade="all, delete-orphan",
-    )
-    resources: Mapped[list["PlayerResource"]] = relationship(
-        back_populates="player",
-        cascade="all, delete-orphan",
-    )
-    achievements: Mapped[list["PlayerAchievement"]] = relationship(
-        back_populates="player",
-        cascade="all, delete-orphan",
-    )
-    titles: Mapped[list["PlayerTitle"]] = relationship(
-        back_populates="player",
-        cascade="all, delete-orphan",
-    )
+    buildings: Mapped[list["PlayerBuilding"]] = relationship(back_populates="player", cascade="all, delete-orphan")
+    workers: Mapped[list["PlayerWorker"]] = relationship(back_populates="player", cascade="all, delete-orphan")
+    resources: Mapped[list["PlayerResource"]] = relationship(back_populates="player", cascade="all, delete-orphan")
+    achievements: Mapped[list["PlayerAchievement"]] = relationship(back_populates="player", cascade="all, delete-orphan")
+    titles: Mapped[list["PlayerTitle"]] = relationship(back_populates="player", cascade="all, delete-orphan")
     caravans: Mapped[list["Caravan"]] = relationship(
         back_populates="player",
         cascade="all, delete-orphan",
@@ -76,23 +58,21 @@ class Player(Base):
 
 class PlayerBuilding(Base):
     __tablename__ = "player_buildings"
-    __table_args__ = (
-        UniqueConstraint("player_id", "building_key", name="uq_player_building"),
-    )
+    __table_args__ = (UniqueConstraint("player_id", "building_key", name="uq_player_building"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
     building_key: Mapped[str] = mapped_column(String(64), index=True)
     level: Mapped[int] = mapped_column(Integer, default=0)
+    auto_mode: Mapped[str] = mapped_column(String(16), default="off")
+    auto_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     player: Mapped["Player"] = relationship(back_populates="buildings")
 
 
 class PlayerWorker(Base):
     __tablename__ = "player_workers"
-    __table_args__ = (
-        UniqueConstraint("player_id", "worker_key", name="uq_player_worker"),
-    )
+    __table_args__ = (UniqueConstraint("player_id", "worker_key", name="uq_player_worker"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
@@ -104,9 +84,7 @@ class PlayerWorker(Base):
 
 class PlayerResource(Base):
     __tablename__ = "player_resources"
-    __table_args__ = (
-        UniqueConstraint("player_id", "resource_key", name="uq_player_resource"),
-    )
+    __table_args__ = (UniqueConstraint("player_id", "resource_key", name="uq_player_resource"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
@@ -118,9 +96,7 @@ class PlayerResource(Base):
 
 class PlayerAchievement(Base):
     __tablename__ = "player_achievements"
-    __table_args__ = (
-        UniqueConstraint("player_id", "achievement_key", name="uq_player_achievement"),
-    )
+    __table_args__ = (UniqueConstraint("player_id", "achievement_key", name="uq_player_achievement"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
@@ -133,9 +109,7 @@ class PlayerAchievement(Base):
 
 class PlayerTitle(Base):
     __tablename__ = "player_titles"
-    __table_args__ = (
-        UniqueConstraint("player_id", "title_key", name="uq_player_title"),
-    )
+    __table_args__ = (UniqueConstraint("player_id", "title_key", name="uq_player_title"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
@@ -150,18 +124,14 @@ class Caravan(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
-
     route_key: Mapped[str] = mapped_column(String(64), index=True)
     guard_level: Mapped[str] = mapped_column(String(32), default="none")
     cargo_json: Mapped[str] = mapped_column(String, default="{}")
-
     cargo_value: Mapped[float] = mapped_column(Float, default=0.0)
     expected_profit: Mapped[float] = mapped_column(Float, default=0.0)
     risk_percent: Mapped[float] = mapped_column(Float, default=0.0)
-
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     ends_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-
     status: Mapped[str] = mapped_column(String(32), default="traveling")
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     success: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
