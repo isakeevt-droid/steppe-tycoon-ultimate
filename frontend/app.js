@@ -82,17 +82,45 @@ async function bootstrap() {
     }
 
     const initData = typeof tg?.initData === 'string' ? tg.initData : '';
-    if (initData) {
-      safeText('boot_status', 'Вход через Telegram…');
-      try {
-        state = await api('/api/auth/telegram', 'POST', { init_data: initData });
-        const user = tg.initDataUnsafe?.user || null;
-        telegramId = user?.id ? String(user.id) : '';
-        username = user?.username || user?.first_name || 'Игрок';
-      } catch (error) {
-        console.warn('Telegram auth fallback:', error);
+
+    // Если игра открыта внутри Telegram — используем только Telegram auth.
+    if (tg) {
+      if (!initData) {
+        throw new Error('Открой игру через кнопку Telegram-бота');
       }
+
+      safeText('boot_status', 'Вход через Telegram…');
+      state = await api('/api/auth/telegram', 'POST', { init_data: initData });
+
+      const user = tg.initDataUnsafe?.user || null;
+      telegramId = user?.id
+        ? String(user.id)
+        : String(state?.player?.telegram_id || '');
+
+      username = user?.username || user?.first_name || 'Игрок';
+    } else {
+      // Локальный вход оставляем только для тестов вне Telegram.
+      safeText('boot_status', 'Локальный вход…');
+      telegramId = localStorage.getItem('steppe_local_id') || `local-${Math.random().toString(36).slice(2, 10)}`;
+      username = localStorage.getItem('steppe_local_name') || 'Игрок';
+      localStorage.setItem('steppe_local_id', telegramId);
+      localStorage.setItem('steppe_local_name', username);
+      state = await api('/api/auth', 'POST', { telegram_id: telegramId, username });
     }
+
+    $('boot')?.classList.add('hidden');
+    $('app')?.classList.remove('hidden');
+    bindStaticEvents();
+    render();
+    startRefreshLoop();
+  } catch (error) {
+    safeText('boot_status', 'Подключение не удалось.');
+    safeText('boot_error', error?.message || String(error));
+    $('boot_retry')?.classList.remove('hidden');
+    $('boot_retry')?.addEventListener('click', bootstrap, { once: true });
+  }
+}
+    
 
     if (!state) {
       safeText('boot_status', 'Локальный вход…');
@@ -159,6 +187,8 @@ function render() {
   renderWarehouse();
   renderCaravans();
   renderMine();
+  renderAchievements();
+  renderLeaderboard();
   switchTab(activeTab);
 }
 
@@ -377,6 +407,67 @@ function renderMine() {
     </div>
   `);
 }
+
+function renderAchievements() {
+  const all = Array.isArray(state.achievements) ? state.achievements : [];
+  const active = Array.isArray(state.active_achievements) ? state.active_achievements : all.filter((a) => !a.unlocked);
+  const completed = Array.isArray(state.completed_achievements) ? state.completed_achievements : all.filter((a) => a.unlocked);
+  const totalBonus = all.reduce((sum, a) => sum + (a.unlocked ? Number(a.bonus_pct || 0) : 0), 0);
+
+  safeHtml('achievements_summary', `
+    <div class="mini-card"><div class="mini-label">Открыто</div><div class="mini-value">${completed.length} / ${all.length}</div><div class="mini-sub">Всего достижений</div></div>
+    <div class="mini-card"><div class="mini-label">Бонус</div><div class="mini-value">+${fmt(totalBonus)}%</div><div class="mini-sub">Суммарный бонус</div></div>
+  `);
+
+  safeHtml('achievements_active', active.length ? active.map(achievementCard).join('') : '<div class="muted">Все достижения уже открыты.</div>');
+  safeHtml('achievements_completed', completed.length ? completed.map(achievementCard).join('') : '<div class="muted">Пока нет открытых достижений.</div>');
+}
+
+function achievementCard(a) {
+  const threshold = Number(a.threshold || 0);
+  const current = Number(a.current || 0);
+  const pct = threshold > 0 ? Math.max(0, Math.min(100, (current / threshold) * 100)) : (a.unlocked ? 100 : 0);
+  return `
+    <div class="resource-card achievement-card ${a.unlocked ? 'is-done' : ''}">
+      <div class="card-head">
+        <div>
+          <div class="card-title"><span class="emoji">${a.unlocked ? '🏆' : '🎯'}</span>${a.name}</div>
+          <div class="card-desc">${a.description}</div>
+        </div>
+        <div class="card-level">+${fmt(a.bonus_pct)}%</div>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div class="progress-meta"><span>${a.unlocked ? 'Выполнено' : `${fmt(Math.min(current, threshold))} / ${fmt(threshold)}`}</span><span>${Math.round(pct)}%</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderLeaderboard() {
+  const rows = Array.isArray(state.leaderboard) ? state.leaderboard : [];
+  const me = rows.find((row) => row.username === state?.player?.username);
+  safeHtml('leaderboard_summary', `
+    <div class="mini-card"><div class="mini-label">Твой рейтинг</div><div class="mini-value">${fmt(state.player.rank_score)}</div><div class="mini-sub">Очки звания</div></div>
+    <div class="mini-card"><div class="mini-label">Позиция</div><div class="mini-value">${me ? `#${me.rank}` : '—'}</div><div class="mini-sub">В топ-20</div></div>
+  `);
+  safeHtml('leaderboard_list', rows.length ? rows.map(leaderboardRow).join('') : '<div class="muted">Топ игроков пока пуст.</div>');
+}
+
+function leaderboardRow(row) {
+  const isMe = row.username === state?.player?.username;
+  return `
+    <div class="resource-card leaderboard-row ${isMe ? 'is-me' : ''}">
+      <div class="leaderboard-rank">#${row.rank}</div>
+      <div class="leaderboard-main">
+        <div class="leaderboard-name">${row.username || 'Игрок'}</div>
+        <div class="leaderboard-sub">${row.title_name || '—'}</div>
+      </div>
+      <div class="leaderboard-score">${fmt(row.gold_earned)}</div>
+    </div>
+  `;
+}
+
 
 async function doAction(path, body) {
   try {
