@@ -10,7 +10,7 @@
   --good: #46cf8d;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; }
+html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
 button, input, select { font: inherit; }
 .hidden { display: none !important; }
 .screen { min-height: 100vh; }
@@ -28,7 +28,7 @@ button, input, select { font: inherit; }
 .mini-label { font-size: 12px; color: var(--muted); }
 .mini-value { font-size: 18px; font-weight: 800; margin-top: 4px; }
 .mini-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
-.main-content { padding: 12px 12px 98px; }
+.main-content { padding: 12px 12px 98px; min-height: calc(100vh - 98px); }
 .page { display: none; }
 .page.active { display: block; }
 .quick-actions, .card-list, .form-stack { display: grid; gap: 10px; }

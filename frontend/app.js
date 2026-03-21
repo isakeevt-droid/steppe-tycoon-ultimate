@@ -194,7 +194,7 @@ function startRefreshLoop() {
 
 function bindStaticEvents() {
   document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scrollToTop: true }));
   });
   document.querySelectorAll('.segment').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.filter === buildingFilter);
@@ -210,12 +210,18 @@ function bindStaticEvents() {
   $('mine_click_btn')?.addEventListener('click', mineClick);
 }
 
-function switchTab(tab) {
-  activeTab = tab;
-  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+function applyActiveTab(tab) {
   document.querySelectorAll('.page').forEach((el) => el.classList.toggle('active', el.id === `tab-${tab}`));
   document.querySelectorAll('.nav-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function switchTab(tab, options = {}) {
+  activeTab = tab;
+  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+  applyActiveTab(activeTab);
+  if (options.scrollToTop) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 }
 
 function render() {
@@ -229,7 +235,7 @@ function render() {
   renderWorkers();
   renderAchievements();
   renderLeaderboard();
-  switchTab(activeTab);
+  applyActiveTab(activeTab);
 }
 
 function renderTop() {
@@ -678,12 +684,10 @@ async function runMineQueue() {
   if (mineWorkerRunning || mineQueuedClicks <= 0) return;
 
   mineWorkerRunning = true;
-  let processed = 0;
 
   try {
     while (mineQueuedClicks > 0) {
       mineQueuedClicks -= 1;
-      processed += 1;
 
       const nextState = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
       state = nextState;
@@ -693,9 +697,8 @@ async function runMineQueue() {
         spawnMineFloat(`КРИТ ${fmt(click.income)}`, { critical: true });
       }
 
-      if (processed % 4 === 0 || mineQueuedClicks === 0) {
-        renderTop();
-      }
+      renderTop();
+      renderMine();
     }
   } catch (error) {
     showError(error);
