@@ -61,27 +61,6 @@ def _title_map(player: Player) -> dict[str, PlayerTitle]:
     return {item.title_key: item for item in player.titles}
 
 
-
-
-def _money_round(value: float) -> float:
-    return round(float(value) + 1e-9, 2)
-
-
-def _has_gold(player: Player, cost: float) -> bool:
-    return _money_round(player.gold) + 1e-6 >= _money_round(cost)
-
-
-def _spend_gold(player: Player, cost: float) -> None:
-    rounded_cost = _money_round(cost)
-    player.gold = _money_round(player.gold - rounded_cost)
-    player.total_gold_spent = _money_round(player.total_gold_spent + rounded_cost)
-
-
-def _add_gold(player: Player, amount: float) -> None:
-    rounded_amount = _money_round(amount)
-    player.gold = _money_round(player.gold + rounded_amount)
-    player.total_gold_earned = _money_round(player.total_gold_earned + rounded_amount)
-
 def _pet_bonus_pct(player: Player) -> float:
     if not player.active_pet_key:
         return 0.0
@@ -184,6 +163,25 @@ def _achievement_bonus_pct(player: Player) -> float:
 def _market_seed() -> int:
     return int(now_utc().timestamp() // 600)
 
+def _money(value: float) -> float:
+    return round(float(value), 2)
+
+
+def _has_enough_gold(player: Player, cost: float) -> bool:
+    return _money(player.gold) + 1e-6 >= _money(cost)
+
+
+def _add_gold(player: Player, amount: float) -> None:
+    amount = _money(amount)
+    player.gold = _money(player.gold + amount)
+    player.total_gold_earned = _money(player.total_gold_earned + amount)
+
+
+def _spend_gold(player: Player, amount: float) -> None:
+    amount = _money(amount)
+    player.gold = _money(player.gold - amount)
+    player.total_gold_spent = _money(player.total_gold_spent + amount)
+
 
 def _auto_active(pb: PlayerBuilding, now=None) -> bool:
     now = now or now_utc()
@@ -216,11 +214,11 @@ def tick_player(db: Session, player: Player) -> None:
     worker_bonus = calculate_worker_bonus(worker_counts)
     salary_per_minute = calculate_worker_salary_per_minute(worker_counts)
     salary_due = salary_per_minute * (elapsed / 60.0)
-    payroll_ok = _has_gold(player, salary_due)
+    payroll_ok = player.gold >= salary_due
     if salary_due > 0:
-        paid = min(_money_round(player.gold), _money_round(salary_due))
-        player.gold = _money_round(player.gold - paid)
-        player.total_gold_spent = _money_round(player.total_gold_spent + paid)
+        paid = _money(min(player.gold, salary_due))
+        if paid > 0:
+            _spend_gold(player, paid)
 
     achievement_bonus = _achievement_bonus_pct(player)
     title_bonus = get_title_bonus_pct(player.title_key)
@@ -297,7 +295,7 @@ def tick_player(db: Session, player: Player) -> None:
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["resource_key"], market_seed)
-            total = round(sell_amount * market_price, 2)
+            total = _money(sell_amount * market_price)
             res.amount -= sell_amount
             _add_gold(player, total)
             continue
@@ -333,7 +331,7 @@ def tick_player(db: Session, player: Player) -> None:
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["output_key"], market_seed)
-            total = round(sell_amount * market_price, 2)
+            total = _money(sell_amount * market_price)
             output_res.amount -= sell_amount
             _add_gold(player, total)
 
@@ -600,8 +598,8 @@ def buy_building(db: Session, telegram_id: str, building_key: str) -> dict:
     player = _get_player(db, telegram_id)
     tick_player(db, player)
     pb = next(x for x in player.buildings if x.building_key == building_key)
-    price = calculate_building_price(building_key, pb.level)
-    if not _has_gold(player, price):
+    price = _money(calculate_building_price(building_key, pb.level))
+    if not _has_enough_gold(player, price):
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     _spend_gold(player, price)
     pb.level += 1
@@ -614,8 +612,8 @@ def hire_worker(db: Session, telegram_id: str, worker_key: str) -> dict:
         raise HTTPException(status_code=400, detail="Неизвестный тип работника")
     player = _get_player(db, telegram_id)
     tick_player(db, player)
-    price = calculate_worker_hire_cost(worker_key)
-    if not _has_gold(player, price):
+    price = _money(calculate_worker_hire_cost(worker_key))
+    if not _has_enough_gold(player, price):
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     _spend_gold(player, price)
     next(x for x in player.workers if x.worker_key == worker_key).count += 1
@@ -689,7 +687,7 @@ def sell_resource(db: Session, telegram_id: str, resource_key: str, amount: floa
     res = _get_or_create_resource(player, resource_key)
     if res.amount < amount:
         raise HTTPException(status_code=400, detail="Недостаточно ресурса")
-    total = _money_round(amount * calculate_market_price(resource_key, _market_seed()))
+    total = _money(amount * calculate_market_price(resource_key, _market_seed()))
     res.amount -= amount
     _add_gold(player, total)
     db.commit()
@@ -701,8 +699,8 @@ def buy_dirham(db: Session, telegram_id: str) -> dict:
     tick_player(db, player)
     if player.dirhams_bought_today >= SETTINGS["dirham_daily_limit"]:
         raise HTTPException(status_code=400, detail="Дневной лимит достигнут")
-    price = calculate_dirham_buy_price(player.dirhams_bought_today)
-    if not _has_gold(player, price):
+    price = _money(calculate_dirham_buy_price(player.dirhams_bought_today))
+    if not _has_enough_gold(player, price):
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     _spend_gold(player, price)
     player.dirhams += 1
@@ -715,8 +713,8 @@ def buy_dirham(db: Session, telegram_id: str) -> dict:
 def storage_upgrade(db: Session, telegram_id: str) -> dict:
     player = _get_player(db, telegram_id)
     tick_player(db, player)
-    price = calculate_storage_upgrade_cost(player.storage_level)
-    if not _has_gold(player, price):
+    price = _money(calculate_storage_upgrade_cost(player.storage_level))
+    if not _has_enough_gold(player, price):
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     _spend_gold(player, price)
     player.storage_level += 1
@@ -742,14 +740,14 @@ def mine_upgrade(db: Session, telegram_id: str, upgrade_type: str = "mine") -> d
     player = _get_player(db, telegram_id)
     tick_player(db, player)
     if upgrade_type == "pickaxe":
-        price = calculate_pickaxe_upgrade_cost(player.mine_pickaxe_level)
-        if not _has_gold(player, price):
+        price = _money(calculate_pickaxe_upgrade_cost(player.mine_pickaxe_level))
+        if not _has_enough_gold(player, price):
             raise HTTPException(status_code=400, detail="Недостаточно золота")
         _spend_gold(player, price)
         player.mine_pickaxe_level += 1
     else:
-        price = calculate_mine_upgrade_cost(player.manual_mine_level)
-        if not _has_gold(player, price):
+        price = _money(calculate_mine_upgrade_cost(player.manual_mine_level))
+        if not _has_enough_gold(player, price):
             raise HTTPException(status_code=400, detail="Недостаточно золота")
         _spend_gold(player, price)
         player.manual_mine_level += 1
@@ -848,9 +846,9 @@ def claim_caravan(db: Session, telegram_id: str, caravan_id: int) -> dict:
     caravan.success = success
     caravan.status = "success" if success else "failed"
     if success:
-        gold = round(caravan.expected_profit, 2)
+        gold = _money(caravan.expected_profit)
         if route.get("bonus_type") == "gold_bonus":
-            gold *= (1 + route["bonus_value"])
+            gold = _money(gold * (1 + route["bonus_value"]))
         _add_gold(player, gold)
         player.total_caravans_success += 1
         player.total_caravan_profit += gold
