@@ -13,7 +13,7 @@
   --good: #46cf8d;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; overflow: hidden; overscroll-behavior-y: none; }
+html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: auto; }
 button, input, select { font: inherit; }
 .hidden { display: none !important; }
 .screen { min-height: var(--app-height); }
@@ -31,7 +31,7 @@ button, input, select { font: inherit; }
 .mini-label { font-size: 12px; color: var(--muted); }
 .mini-value { font-size: 18px; font-weight: 800; margin-top: 4px; }
 .mini-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
-.main-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; touch-action: pan-y; padding: 12px 12px calc(var(--bottom-nav-space) + var(--bottom-safe) + 14px); }
+.main-content { min-height: 0; overflow: visible; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 12px 12px 0; }
 .page { display: none; }
 .page.active { display: block; }
 .quick-actions, .card-list, .form-stack { display: grid; gap: 10px; }
@@ -152,7 +152,11 @@ button, input, select { font: inherit; }
   .quick-amounts { grid-template-columns: 1fr 1fr 1fr; }
 }
 
-#app { min-height: var(--app-height); height: var(--app-height); display: flex; flex-direction: column; overflow: hidden; }
+#app { min-height: var(--app-height); display: block; overflow: visible; padding-bottom: calc(var(--bottom-nav-space) + var(--bottom-safe) + 16px); }
 body { position: relative; }
-.topbar { flex: 0 0 auto; }
+.topbar { position: sticky; top: 0; }
 .bottom-nav { touch-action: manipulation; }
+
+
+.page { min-height: 1px; }
+.bottom-nav { will-change: transform; }

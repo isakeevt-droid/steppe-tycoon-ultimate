@@ -236,8 +236,7 @@ function switchTab(tab) {
   activeTab = tab || 'buildings';
   localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
-  const main = document.querySelector('.main-content');
-  if (main) main.scrollTop = 0; else window.scrollTo(0, 0);
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   syncViewportLayout();
 }
 
