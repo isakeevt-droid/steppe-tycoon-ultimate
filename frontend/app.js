@@ -220,7 +220,8 @@ function switchTab(tab, options = {}) {
   applyActiveTab(activeTab);
   if (options.scrollToTop) {
     requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, behavior: 'auto' });
+      const scroller = document.querySelector('.main-content');
+      if (scroller) scroller.scrollTo({ top: 0, behavior: 'auto' });
     });
   }
 }
