@@ -16,6 +16,7 @@ let recentBuiltBuildingKey = null;
 let mineQueuedClicks = 0;
 let mineWorkerRunning = false;
 let mineVisualSeed = 0;
+let minePendingVisualIncomes = [];
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -98,7 +99,7 @@ function bindLifecycleEvents() {
     if (!document.hidden && telegramId) {
       try {
         state = await api(`/api/state/${telegramId}`);
-        render({ keepScroll: false });
+        render();
       } catch (error) {
         console.error('resume refresh error', error);
       }
@@ -157,6 +158,7 @@ async function bootstrap() {
     bindStaticEvents();
     bindLifecycleEvents();
     render();
+    switchTab(activeTab);
     startRefreshLoop();
   } catch (error) {
     safeText('boot_status', 'Подключение не удалось.');
@@ -194,7 +196,7 @@ function startRefreshLoop() {
 
 function bindStaticEvents() {
   document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scrollToTop: true }));
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.querySelectorAll('.segment').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.filter === buildingFilter);
@@ -215,36 +217,15 @@ function applyActiveTab(tab) {
   document.querySelectorAll('.nav-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
 }
 
-function switchTab(tab, options = {}) {
-  activeTab = tab;
+function switchTab(tab) {
+  activeTab = tab || 'buildings';
   localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
-  if (options.scrollToTop) {
-    window.scrollTo(0, 0);
-  }
+  window.scrollTo(0, 0);
 }
 
-function getScrollRoot() {
-  return document.scrollingElement || document.documentElement || document.body;
-}
-
-function getScrollY() {
-  return window.scrollY || getScrollRoot().scrollTop || 0;
-}
-
-function setScrollY(value) {
-  const y = Math.max(0, Number(value) || 0);
-  window.scrollTo(0, y);
-  const root = getScrollRoot();
-  if (root) root.scrollTop = y;
-  if (document.body) document.body.scrollTop = y;
-}
-
-function render(options = {}) {
+function render() {
   if (!state?.player) return;
-  const keepScroll = options.keepScroll !== false;
-  const prevScrollY = keepScroll ? getScrollY() : 0;
-
   renderTop();
   renderQuickActions();
   renderBuildings();
@@ -255,16 +236,13 @@ function render(options = {}) {
   renderAchievements();
   renderLeaderboard();
   applyActiveTab(activeTab);
-
-  if (keepScroll) {
-    requestAnimationFrame(() => setScrollY(prevScrollY));
-  }
 }
 
 function renderTop() {
   const p = state.player;
+  const optimisticGold = minePendingVisualIncomes.reduce((sum, income) => sum + Number(income || 0), 0);
   safeHtml('top_stats', `
-    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(p.gold)}</div><div class="mini-sub">Баланс</div></div>
+    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(Number(p.gold || 0) + optimisticGold)}</div><div class="mini-sub">Баланс</div></div>
     <div class="mini-card"><div class="mini-label">Дирхамы</div><div class="mini-value">${fmt(p.dirhams, 0)}</div><div class="mini-sub">Редкая валюта</div></div>
     <div class="mini-card"><div class="mini-label">Склад</div><div class="mini-value">${fmt(p.storage_used)} / ${fmt(p.storage_capacity)}</div><div class="mini-sub">Заполненность</div></div>
     <div class="mini-card"><div class="mini-label">Звание</div><div class="mini-value">${p.title_name}</div><div class="mini-sub">${fmt(p.rank_score)} рейтинга</div></div>
@@ -689,7 +667,9 @@ function mineClick(event) {
   mineQueuedClicks += 1;
   mineVisualSeed += 1;
 
-  const instantIncome = Number(state?.player?.mine_income || 1);
+  const predictedIncome = Number(state?.player?.mine_income || 1);
+  minePendingVisualIncomes.push(predictedIncome);
+
   const rect = btn.getBoundingClientRect();
   const hasPointer = event && typeof event.clientX === 'number' && typeof event.clientY === 'number';
   const xPercent = hasPointer
@@ -699,7 +679,8 @@ function mineClick(event) {
     ? Math.max(28, Math.min(rect.height - 22, rect.bottom - event.clientY))
     : 56 + (mineVisualSeed % 4) * 10;
 
-  spawnMineFloat(`+${fmt(instantIncome)}`, { xPercent, bottomOffset });
+  spawnMineFloat(`+${fmt(predictedIncome)}`, { xPercent, bottomOffset });
+  renderTop();
   runMineQueue();
 }
 
@@ -713,6 +694,9 @@ async function runMineQueue() {
       mineQueuedClicks -= 1;
 
       const nextState = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
+      if (minePendingVisualIncomes.length > 0) {
+        minePendingVisualIncomes.shift();
+      }
       state = nextState;
 
       const click = nextState?.mine_click;
@@ -724,6 +708,8 @@ async function runMineQueue() {
       renderMine();
     }
   } catch (error) {
+    minePendingVisualIncomes = [];
+    renderTop();
     showError(error);
   } finally {
     mineWorkerRunning = false;
