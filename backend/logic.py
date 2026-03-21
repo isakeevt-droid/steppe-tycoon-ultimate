@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from .content import ACHIEVEMENTS, BUILDINGS, CARAVAN_ROUTES, GUARDS, PROCESSING_RECIPES, RESOURCES, SETTINGS, TITLES, WORKERS, WORKER_UPGRADES
+from .content import ACHIEVEMENTS, BUILDINGS, CARAVAN_ROUTES, GUARDS, PETS, PROCESSING_RECIPES, RESOURCES, SETTINGS, TITLES, WORKERS, WORKER_UPGRADES
 from .economy import (
     calculate_auto_activation_cost,
     calculate_building_output_per_second,
@@ -59,6 +59,35 @@ def _achievement_map(player: Player) -> dict[str, PlayerAchievement]:
 
 def _title_map(player: Player) -> dict[str, PlayerTitle]:
     return {item.title_key: item for item in player.titles}
+
+
+def _pet_bonus_pct(player: Player) -> float:
+    if not player.active_pet_key:
+        return 0.0
+    pet = PETS.get(player.active_pet_key)
+    if not pet:
+        return 0.0
+    return float(pet.get("bonus_pct", 0.0))
+
+
+def _chest_rewards_preview() -> dict:
+    pet_drop = max(float(SETTINGS.get("chest_pet_drop_chance", 0.0)), max((float(p.get("drop_chance", 0.0)) for p in PETS.values()), default=0.0))
+    return {
+        "gold_min": int(SETTINGS.get("chest_gold_min", 40)),
+        "gold_max": int(SETTINGS.get("chest_gold_max", 90)),
+        "dirham_chance_pct": round(float(SETTINGS.get("chest_dirham_chance", 0.35)) * 100, 1),
+        "pet_drop_chance_pct": round(pet_drop * 100, 1),
+        "pets": [
+            {
+                "key": key,
+                "name": value["name"],
+                "emoji": value.get("emoji", "🐾"),
+                "bonus_pct": float(value.get("bonus_pct", 0.0)),
+                "description": value.get("description", ""),
+            }
+            for key, value in PETS.items()
+        ],
+    }
 
 
 def _get_or_create_resource(player: Player, key: str) -> PlayerResource:
@@ -174,7 +203,8 @@ def tick_player(db: Session, player: Player) -> None:
 
     achievement_bonus = _achievement_bonus_pct(player)
     title_bonus = get_title_bonus_pct(player.title_key)
-    global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus)
+    pet_bonus = _pet_bonus_pct(player)
+    global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus + pet_bonus)
     resources = _resource_map(player)
     capacity = calculate_storage_capacity(player.storage_level)
     storage_used = _storage_used(player)
@@ -336,7 +366,8 @@ def make_state(db: Session, telegram_id: str) -> dict:
 def _serialize_state(db: Session, player: Player) -> dict:
     achievement_bonus = _achievement_bonus_pct(player)
     title_bonus = get_title_bonus_pct(player.title_key)
-    total_bonus = achievement_bonus + title_bonus
+    pet_bonus = _pet_bonus_pct(player)
+    total_bonus = achievement_bonus + title_bonus + pet_bonus
     market_seed = _market_seed()
     title_meta = next((t for t in TITLES if t["key"] == player.title_key), TITLES[0])
     next_title = get_next_title(player.title_key)
@@ -348,7 +379,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
     worker_bonus = calculate_worker_bonus(worker_counts)
     worker_salary_per_minute = calculate_worker_salary_per_minute(worker_counts)
     worker_total_count = sum(worker_counts.values())
-    global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus)
+    global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus + pet_bonus)
     resources_map = _resource_map(player)
     now = now_utc()
     base_tap, avg_tap, crit_chance, crit_mult = calculate_mine_click_income(player.manual_mine_level, player.mine_pickaxe_level, achievement_bonus, title_bonus)
@@ -507,6 +538,19 @@ def _serialize_state(db: Session, player: Player) -> dict:
             "max_active_caravans": SETTINGS["max_active_caravans"],
             "chest_ready": player.free_chest_ready_at <= now,
             "chest_seconds": max(0, int((player.free_chest_ready_at - now).total_seconds())),
+            "chest_description": "Сундук открывается бесплатно раз в 4 часа: внутри золото, шанс на дирхам и редкий шанс на питомца.",
+            "chest_preview": _chest_rewards_preview(),
+            "dirham_description": "Дирхамы — редкая валюта. Нужны для охраны караванов, автопродажи, автопереработки и улучшения работников.",
+            "dirham_price_explainer": f"Цена за 1 дирхам. Сегодня куплено: {player.dirhams_bought_today}/{SETTINGS['dirham_daily_limit']}. После каждой покупки цена растёт.",
+            "pet_bonus_pct": round(pet_bonus, 2),
+            "pets_found": player.pets_found,
+            "active_pet": ({
+                "key": player.active_pet_key,
+                "name": PETS[player.active_pet_key]["name"],
+                "emoji": PETS[player.active_pet_key].get("emoji", "🐾"),
+                "bonus_pct": PETS[player.active_pet_key].get("bonus_pct", 0.0),
+                "description": PETS[player.active_pet_key].get("description", ""),
+            } if player.active_pet_key in PETS else None),
         },
         "buildings": buildings,
         "resources": resources,
@@ -811,11 +855,40 @@ def open_chest(db: Session, telegram_id: str) -> dict:
     now = now_utc()
     if player.free_chest_ready_at > now:
         raise HTTPException(status_code=400, detail="Сундук ещё не готов")
-    reward_gold = random.randint(40, 90)
-    reward_dirhams = 1 if random.random() < 0.35 else 0
+
+    reward_gold = random.randint(int(SETTINGS.get("chest_gold_min", 40)), int(SETTINGS.get("chest_gold_max", 90)))
+    reward_dirhams = 1 if random.random() < float(SETTINGS.get("chest_dirham_chance", 0.35)) else 0
+
+    dropped_pet_key = None
+    if player.active_pet_key is None:
+        candidates = []
+        for pet_key, pet in PETS.items():
+            chance = float(pet.get("drop_chance", SETTINGS.get("chest_pet_drop_chance", 0.05)))
+            candidates.append((pet_key, chance))
+        for pet_key, chance in candidates:
+            if random.random() < chance:
+                dropped_pet_key = pet_key
+                break
+
     player.gold += reward_gold
     player.total_gold_earned += reward_gold
     player.dirhams += reward_dirhams
+
+    if dropped_pet_key:
+        player.active_pet_key = dropped_pet_key
+        player.pets_found += 1
+
     player.free_chest_ready_at = now + timedelta(seconds=SETTINGS["free_chest_cooldown_seconds"])
     db.commit()
-    return _serialize_state(db, player)
+    state = _serialize_state(db, player)
+    state["chest_open"] = {
+        "gold": reward_gold,
+        "dirhams": reward_dirhams,
+        "pet": ({
+            "key": dropped_pet_key,
+            "name": PETS[dropped_pet_key]["name"],
+            "emoji": PETS[dropped_pet_key].get("emoji", "🐾"),
+            "bonus_pct": PETS[dropped_pet_key].get("bonus_pct", 0.0),
+        } if dropped_pet_key else None),
+    }
+    return state

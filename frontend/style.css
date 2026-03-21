@@ -114,3 +114,37 @@ button, input, select { font: inherit; }
 .upgrade-pill-sub { font-size: 12px; color: var(--muted); }
 .worker-card.is-empty { opacity: 0.92; }
 @media (max-width: 430px) { .bottom-nav { grid-template-columns: repeat(4, 1fr); } }
+
+
+.info-card { padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+.info-title { font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.info-desc { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.info-sub { margin-top: 8px; font-size: 12px; color: var(--muted); }
+
+
+.brand-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.quick-amounts { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+
+@media (max-width: 520px) {
+  .topbar { padding: 12px 12px 10px; }
+  .title { font-size: 24px; }
+  .subtitle { font-size: 12px; }
+  .main-content { padding: 10px 10px 108px; }
+  .section-card, .building-card, .resource-card, .caravan-card, .upgrade-card, .mini-card, .info-card { border-radius: 16px; }
+  .section-card, .building-card, .resource-card, .caravan-card, .upgrade-card { padding: 12px; }
+  .quick-actions { grid-template-columns: 1fr; }
+  .btn-row { grid-template-columns: 1fr 1fr; }
+  .field input, .field select, .btn, .segment, .nav-btn { min-height: 52px; }
+  .mode-badge { padding: 9px 10px; font-size: 12px; }
+  .card-title { font-size: 15px; }
+  .card-desc { font-size: 12px; }
+}
+
+@media (max-width: 390px) {
+  .stats-grid, .mine-summary { grid-template-columns: 1fr 1fr; }
+  .stat-grid { grid-template-columns: 1fr; }
+  .btn-row { grid-template-columns: 1fr; }
+  .upgrade-pill { flex-direction: column; align-items: stretch; }
+  .nav-btn { min-height: 54px; }
+  .quick-amounts { grid-template-columns: 1fr 1fr 1fr; }
+}

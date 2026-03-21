@@ -40,6 +40,8 @@ class Player(Base):
 
     last_tick_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     free_chest_ready_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    pets_found: Mapped[int] = mapped_column(Integer, default=0)
+    active_pet_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Steppe Tycoon</title>
-  <link rel="stylesheet" href="/frontend/style.css?v=10.0">
+  <link rel="stylesheet" href="/frontend/style.css?v=10.2">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -31,6 +31,7 @@
     <main class="main-content">
       <section id="tab-buildings" class="page active">
         <div class="quick-actions" id="quick_actions"></div>
+        <div id="quick_actions_info" class="card-list compact-top"></div>
         <div class="segmented">
           <button class="segment active" data-filter="producing">Добыча</button>
           <button class="segment" data-filter="processing">Переработка</button>
@@ -55,11 +56,17 @@
       <section id="tab-caravans" class="page">
         <div class="section-card">
           <div class="section-title">Отправить караван</div>
+          <div class="section-subtitle">Быстрые кнопки ниже подставляют количество автоматически</div>
           <div class="form-stack">
             <label class="field"><span>Маршрут</span><select id="route_select"></select></label>
             <label class="field"><span>Охрана</span><select id="guard_select"></select></label>
             <label class="field"><span>Товар</span><select id="resource_select"></select></label>
             <label class="field"><span>Количество</span><input id="caravan_amount" type="number" min="1" step="1"></label>
+            <div class="quick-amounts">
+              <button type="button" class="btn tiny" data-caravan-share="0.25">25%</button>
+              <button type="button" class="btn tiny" data-caravan-share="0.5">50%</button>
+              <button type="button" class="btn tiny" data-caravan-share="1">Макс</button>
+            </div>
           </div>
           <div id="caravan_preview" class="hint-block"></div>
           <button id="send_caravan_btn" class="btn primary full">Отправить караван</button>
@@ -135,6 +142,6 @@
     </nav>
   </div>
 
-  <script src="/frontend/app.js?v=10.0"></script>
+  <script src="/frontend/app.js?v=10.2"></script>
 </body>
 </html>

@@ -1,11 +1,16 @@
 const API = window.location.origin;
 const AUTO_CLEAR_KEY = 'steppe_hidden_completed_caravans';
+const TG_ID_CACHE_KEY = 'steppe_tg_id';
+const TG_NAME_CACHE_KEY = 'steppe_tg_name';
+const TG_INIT_CACHE_KEY = 'steppe_tg_init';
+const ACTIVE_TAB_KEY = 'steppe_active_tab';
+const BUILDING_FILTER_KEY = 'steppe_building_filter';
 
 let state = null;
 let telegramId = '';
 let username = '';
-let activeTab = 'buildings';
-let buildingFilter = 'producing';
+let activeTab = localStorage.getItem(ACTIVE_TAB_KEY) || 'buildings';
+let buildingFilter = localStorage.getItem(BUILDING_FILTER_KEY) || 'producing';
 let refreshTimer = null;
 let recentBuiltBuildingKey = null;
 let mineQueuedClicks = 0;
@@ -74,6 +79,42 @@ function getBuildingLevel(appState, key) {
   return Number((appState?.buildings || []).find((b) => b.key === key)?.level || 0);
 }
 
+function saveTelegramSession(id, name, initData = '') {
+  if (id) localStorage.setItem(TG_ID_CACHE_KEY, String(id));
+  if (name) localStorage.setItem(TG_NAME_CACHE_KEY, String(name));
+  if (initData) sessionStorage.setItem(TG_INIT_CACHE_KEY, initData);
+}
+
+function loadTelegramSession() {
+  return {
+    telegramId: localStorage.getItem(TG_ID_CACHE_KEY) || '',
+    username: localStorage.getItem(TG_NAME_CACHE_KEY) || 'Игрок',
+    initData: sessionStorage.getItem(TG_INIT_CACHE_KEY) || '',
+  };
+}
+
+function bindLifecycleEvents() {
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden && telegramId) {
+      try {
+        state = await api(`/api/state/${telegramId}`);
+        render();
+      } catch (error) {
+        console.error('resume refresh error', error);
+      }
+    }
+  });
+  window.addEventListener('pageshow', async () => {
+    if (!telegramId) return;
+    try {
+      state = await api(`/api/state/${telegramId}`);
+      render();
+    } catch (error) {
+      console.error('pageshow refresh error', error);
+    }
+  });
+}
+
 async function bootstrap() {
   try {
     safeText('boot_status', 'Проверка сервера…');
@@ -84,25 +125,25 @@ async function bootstrap() {
       try { tg.ready(); tg.expand(); } catch {}
     }
 
-    const initData = typeof tg?.initData === 'string' ? tg.initData : '';
+    const cached = loadTelegramSession();
+    const initData = typeof tg?.initData === 'string' && tg.initData ? tg.initData : cached.initData;
 
-    // Если игра открыта внутри Telegram — используем только Telegram auth.
     if (tg) {
-      if (!initData) {
-        throw new Error('Открой игру через кнопку Telegram-бота');
-      }
-
       safeText('boot_status', 'Вход через Telegram…');
-      state = await api('/api/auth/telegram', 'POST', { init_data: initData });
-
-      const user = tg.initDataUnsafe?.user || null;
-      telegramId = user?.id
-        ? String(user.id)
-        : String(state?.player?.telegram_id || '');
-
-      username = user?.username || user?.first_name || 'Игрок';
+      if (initData) {
+        state = await api('/api/auth/telegram', 'POST', { init_data: initData });
+        const user = tg.initDataUnsafe?.user || null;
+        telegramId = user?.id ? String(user.id) : String(state?.player?.telegram_id || cached.telegramId || '');
+        username = user?.username || user?.first_name || cached.username || 'Игрок';
+        saveTelegramSession(telegramId, username, initData);
+      } else if (cached.telegramId) {
+        telegramId = cached.telegramId;
+        username = cached.username || 'Игрок';
+        state = await api(`/api/state/${telegramId}`);
+      } else {
+        throw new Error('Не удалось восстановить Telegram-сессию. Открой игру заново из бота.');
+      }
     } else {
-      // Локальный вход оставляем только для тестов вне Telegram.
       safeText('boot_status', 'Локальный вход…');
       telegramId = localStorage.getItem('steppe_local_id') || `local-${Math.random().toString(36).slice(2, 10)}`;
       username = localStorage.getItem('steppe_local_name') || 'Игрок';
@@ -114,6 +155,7 @@ async function bootstrap() {
     $('boot')?.classList.add('hidden');
     $('app')?.classList.remove('hidden');
     bindStaticEvents();
+    bindLifecycleEvents();
     render();
     startRefreshLoop();
   } catch (error) {
@@ -124,9 +166,6 @@ async function bootstrap() {
   }
 }
 
-    
-
-
 function startRefreshLoop() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(async () => {
@@ -136,6 +175,19 @@ function startRefreshLoop() {
       render();
     } catch (error) {
       console.error('refresh error', error);
+      if (String(error?.message || '').includes('Игрок не найден')) {
+        try {
+          const cached = loadTelegramSession();
+          if (cached.initData) {
+            state = await api('/api/auth/telegram', 'POST', { init_data: cached.initData });
+            telegramId = String(state?.player?.telegram_id || telegramId);
+            saveTelegramSession(telegramId, username || cached.username, cached.initData);
+            render();
+          }
+        } catch (rehydrateError) {
+          console.error('rehydrate error', rehydrateError);
+        }
+      }
     }
   }, 5000);
 }
@@ -145,8 +197,10 @@ function bindStaticEvents() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.querySelectorAll('.segment').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.filter === buildingFilter);
     btn.addEventListener('click', () => {
       buildingFilter = btn.dataset.filter;
+      localStorage.setItem(BUILDING_FILTER_KEY, buildingFilter);
       document.querySelectorAll('.segment').forEach((el) => el.classList.toggle('active', el.dataset.filter === buildingFilter));
       renderBuildings();
     });
@@ -158,8 +212,10 @@ function bindStaticEvents() {
 
 function switchTab(tab) {
   activeTab = tab;
+  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   document.querySelectorAll('.page').forEach((el) => el.classList.toggle('active', el.id === `tab-${tab}`));
   document.querySelectorAll('.nav-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function render() {
@@ -188,10 +244,30 @@ function renderTop() {
 
 function renderQuickActions() {
   const p = state.player;
+  const chestPreview = p.chest_preview || {};
+  const activePet = p.active_pet;
+  const petLine = activePet
+    ? `${activePet.emoji || '🐾'} Питомец: ${activePet.name} (+${fmt(activePet.bonus_pct || 0)}%)`
+    : `🐾 Шанс питомца: ${fmt(chestPreview.pet_drop_chance_pct || 0, 1)}%`;
+
   safeHtml('quick_actions', `
-    <button class="btn" id="open_chest_btn">${p.chest_ready ? '🎁 Открыть сундук' : `🎁 ${timeFmt(p.chest_seconds)}`}</button>
-    <button class="btn" id="buy_dirham_btn">💠 Дирхам — ${fmt(p.dirham_price)}</button>
+    <button class="btn" id="open_chest_btn" title="${p.chest_description || ''}">${p.chest_ready ? '🎁 Открыть сундук' : `🎁 ${timeFmt(p.chest_seconds)}`}</button>
+    <button class="btn" id="buy_dirham_btn" title="${p.dirham_description || ''}">💠 Дирхам — ${fmt(p.dirham_price)}</button>
   `);
+
+  safeHtml('quick_actions_info', `
+    <div class="info-card">
+      <div class="info-title">🎁 Сундук</div>
+      <div class="info-desc">${p.chest_description || ''}</div>
+      <div class="info-sub">Дроп: ${fmt(chestPreview.gold_min || 0, 0)}–${fmt(chestPreview.gold_max || 0, 0)} золота · дирхам ${fmt(chestPreview.dirham_chance_pct || 0, 1)}% · ${petLine}</div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">💠 Дирхамы</div>
+      <div class="info-desc">${p.dirham_description || ''}</div>
+      <div class="info-sub">${p.dirham_price_explainer || ''}</div>
+    </div>
+  `);
+
   $('open_chest_btn')?.addEventListener('click', () => doAction('/api/chest/open', { telegram_id: telegramId }));
   $('buy_dirham_btn')?.addEventListener('click', () => doAction('/api/dirham/buy', { telegram_id: telegramId }));
 }
@@ -339,6 +415,24 @@ function renderCaravans() {
   ['route_select', 'guard_select', 'resource_select', 'caravan_amount'].forEach((id) => {
     const event = id === 'caravan_amount' ? 'input' : 'change';
     $(id)?.addEventListener(event, updateCaravanPreview);
+  });
+
+  const selectedResource = available.find((r) => r.key === ($('resource_select')?.value || available[0]?.key));
+  const maxAmount = Number(selectedResource?.amount || 0);
+  const amountInput = $('caravan_amount');
+  if (amountInput) {
+    amountInput.max = maxAmount > 0 ? String(Math.floor(maxAmount)) : '0';
+    const currentAmount = Number(amountInput.value || 0);
+    if (!currentAmount || currentAmount > maxAmount) amountInput.value = maxAmount > 0 ? String(Math.max(1, Math.floor(maxAmount))) : '';
+  }
+  document.querySelectorAll('[data-caravan-share]').forEach((btn) => {
+    btn.onclick = () => {
+      if (!amountInput) return;
+      const share = Number(btn.dataset.caravanShare || 1);
+      const next = Math.max(1, Math.floor(maxAmount * share));
+      amountInput.value = String(share >= 1 ? Math.floor(maxAmount) : next);
+      updateCaravanPreview();
+    };
   });
 
   safeHtml('caravan_active', active.length ? active.map((c) => caravanCard(c, false)).join('') : '<div class="muted">Активных караванов нет.</div>');
@@ -513,6 +607,13 @@ async function doAction(path, body) {
   try {
     state = await api(path, 'POST', body);
     render();
+    const chest = state?.chest_open;
+    if (chest) {
+      const parts = [`+${fmt(chest.gold || 0, 0)} золота`];
+      if (Number(chest.dirhams || 0) > 0) parts.push(`+${fmt(chest.dirhams, 0)} дирхам`);
+      if (chest.pet) parts.push(`${chest.pet.emoji || '🐾'} Питомец: ${chest.pet.name}`);
+      window.alert(`Сундук открыт: ${parts.join(' · ')}`);
+    }
   } catch (error) {
     showError(error);
   }

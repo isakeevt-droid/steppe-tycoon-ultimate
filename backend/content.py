@@ -197,6 +197,16 @@ CARAVAN_ROUTES = {
     },
 }
 
+PETS = {
+    "steppe_fox": {
+        "name": "Степная лиса",
+        "emoji": "🦊",
+        "drop_chance": 0.05,
+        "bonus_pct": 3.0,
+        "description": "Редкий питомец из сундука. Даёт +3% ко всему доходу.",
+    },
+}
+
 GUARDS = {
     "none": {"name": "Без охраны", "cost_dirhams": 0, "risk_reduction": 0.0},
     "basic": {"name": "Базовая", "cost_dirhams": 1, "risk_reduction": 15.0},
@@ -252,5 +262,9 @@ SETTINGS = {
     "dirham_price_growth": 1.40,
     "dirham_daily_limit": 6,
     "free_chest_cooldown_seconds": 4 * 3600,
+    "chest_gold_min": 40,
+    "chest_gold_max": 90,
+    "chest_dirham_chance": 0.35,
+    "chest_pet_drop_chance": 0.05,
     "max_active_caravans": 5,
 }

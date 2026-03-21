@@ -68,8 +68,10 @@ def _safe_add_column(table: str, col_sql: str) -> None:
 _safe_add_column("players", "mine_pickaxe_level INTEGER DEFAULT 0")
 _safe_add_column("player_buildings", "auto_mode VARCHAR(16) DEFAULT 'off'")
 _safe_add_column("player_buildings", "auto_until DATETIME")
+_safe_add_column("players", "pets_found INTEGER DEFAULT 0")
+_safe_add_column("players", "active_pet_key VARCHAR(64)")
 
-app = FastAPI(title="Steppe Tycoon", version="7.4.0")
+app = FastAPI(title="Steppe Tycoon", version="7.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
