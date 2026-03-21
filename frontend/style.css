@@ -153,74 +153,24 @@ button, input, select { font: inherit; }
   .quick-amounts { grid-template-columns: 1fr 1fr 1fr; }
 }
 
-/* mobile scroll fix v10.9 */
+
 html, body {
-  margin: 0;
-  height: 100%;
-  min-height: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
+  height: auto;
+  max-height: none;
+  scroll-behavior: auto;
 }
 
 body {
-  background: linear-gradient(180deg, #061225, #081528);
-  color: var(--text);
-  font-family: Inter, Arial, sans-serif;
-  position: fixed;
-  inset: 0;
-  width: 100%;
+  position: static;
 }
 
-.screen {
-  height: 100dvh;
-  min-height: 100dvh;
+.main-content, .screen, #app {
+  overflow: visible;
 }
+
 
 #app {
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  min-height: 100dvh;
-  overflow: hidden;
-}
-
-.topbar {
-  flex: 0 0 auto;
-  position: sticky;
-  top: 0;
-}
-
-.main-content {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
-  touch-action: pan-y;
-  padding-bottom: calc(var(--bottom-nav-space) + var(--bottom-safe) + 28px);
-}
-
-.page.active {
-  display: block;
-}
-
-.section-card,
-.building-card,
-.resource-card,
-.caravan-card,
-.upgrade-card,
-.quick-actions,
-.card-list,
-.segmented,
-.stats-grid,
-.mine-wrap,
-.field,
-.section-head,
-.card-head,
-.card-desc,
-.card-title,
-.stat-grid,
-.progress-wrap {
-  touch-action: pan-y;
 }
