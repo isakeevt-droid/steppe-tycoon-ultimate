@@ -98,7 +98,7 @@ function bindLifecycleEvents() {
     if (!document.hidden && telegramId) {
       try {
         state = await api(`/api/state/${telegramId}`);
-        render();
+        render({ keepScroll: false });
       } catch (error) {
         console.error('resume refresh error', error);
       }
@@ -220,12 +220,31 @@ function switchTab(tab, options = {}) {
   localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
   if (options.scrollToTop) {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo(0, 0);
   }
 }
 
-function render() {
+function getScrollRoot() {
+  return document.scrollingElement || document.documentElement || document.body;
+}
+
+function getScrollY() {
+  return window.scrollY || getScrollRoot().scrollTop || 0;
+}
+
+function setScrollY(value) {
+  const y = Math.max(0, Number(value) || 0);
+  window.scrollTo(0, y);
+  const root = getScrollRoot();
+  if (root) root.scrollTop = y;
+  if (document.body) document.body.scrollTop = y;
+}
+
+function render(options = {}) {
   if (!state?.player) return;
+  const keepScroll = options.keepScroll !== false;
+  const prevScrollY = keepScroll ? getScrollY() : 0;
+
   renderTop();
   renderQuickActions();
   renderBuildings();
@@ -236,6 +255,10 @@ function render() {
   renderAchievements();
   renderLeaderboard();
   applyActiveTab(activeTab);
+
+  if (keepScroll) {
+    requestAnimationFrame(() => setScrollY(prevScrollY));
+  }
 }
 
 function renderTop() {
