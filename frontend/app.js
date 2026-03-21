@@ -16,6 +16,7 @@ let recentBuiltBuildingKey = null;
 let mineQueuedClicks = 0;
 let mineWorkerRunning = false;
 let mineVisualSeed = 0;
+let minePendingVisualIncomes = [];
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -79,41 +80,68 @@ function getBuildingLevel(appState, key) {
   return Number((appState?.buildings || []).find((b) => b.key === key)?.level || 0);
 }
 
+
+function updateLayoutMetrics() {
+  const nav = document.querySelector('.bottom-nav');
+  const navHeight = nav ? Math.ceil(nav.getBoundingClientRect().height) : 110;
+  document.documentElement.style.setProperty('--bottom-nav-space', `${navHeight + 14}px`);
+}
+
 function saveTelegramSession(id, name, initData = '') {
   if (id) localStorage.setItem(TG_ID_CACHE_KEY, String(id));
   if (name) localStorage.setItem(TG_NAME_CACHE_KEY, String(name));
-  if (initData) sessionStorage.setItem(TG_INIT_CACHE_KEY, initData);
+  if (initData) {
+    sessionStorage.setItem(TG_INIT_CACHE_KEY, initData);
+    localStorage.setItem(TG_INIT_CACHE_KEY, initData);
+  }
 }
 
 function loadTelegramSession() {
+  const initData = sessionStorage.getItem(TG_INIT_CACHE_KEY) || localStorage.getItem(TG_INIT_CACHE_KEY) || '';
   return {
     telegramId: localStorage.getItem(TG_ID_CACHE_KEY) || '',
     username: localStorage.getItem(TG_NAME_CACHE_KEY) || 'Игрок',
-    initData: sessionStorage.getItem(TG_INIT_CACHE_KEY) || '',
+    initData,
   };
 }
 
 function bindLifecycleEvents() {
-  document.addEventListener('visibilitychange', async () => {
-    if (!document.hidden && telegramId) {
-      try {
-        state = await api(`/api/state/${telegramId}`);
-        render({ keepScroll: false });
-      } catch (error) {
-        console.error('resume refresh error', error);
-      }
-    }
-  });
-  window.addEventListener('pageshow', async () => {
+  const refreshFromServer = async () => {
     if (!telegramId) return;
     try {
       state = await api(`/api/state/${telegramId}`);
       render();
+      updateLayoutMetrics();
     } catch (error) {
-      console.error('pageshow refresh error', error);
+      console.error('resume refresh error', error);
+      try {
+        const cached = loadTelegramSession();
+        if (cached.initData) {
+          state = await api('/api/auth/telegram', 'POST', { init_data: cached.initData });
+        } else if (cached.telegramId) {
+          state = await api('/api/auth', 'POST', { telegram_id: cached.telegramId, username: cached.username || 'Игрок' });
+        } else {
+          throw error;
+        }
+        telegramId = String(state?.player?.telegram_id || cached.telegramId || telegramId);
+        username = cached.username || username || 'Игрок';
+        saveTelegramSession(telegramId, username, cached.initData || '');
+        render();
+        updateLayoutMetrics();
+      } catch (rehydrateError) {
+        console.error('rehydrate error', rehydrateError);
+      }
     }
+  };
+
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden && telegramId) await refreshFromServer();
   });
+  window.addEventListener('pageshow', refreshFromServer);
+  window.addEventListener('resize', updateLayoutMetrics);
+  window.addEventListener('orientationchange', updateLayoutMetrics);
 }
+
 
 async function bootstrap() {
   try {
@@ -154,9 +182,11 @@ async function bootstrap() {
 
     $('boot')?.classList.add('hidden');
     $('app')?.classList.remove('hidden');
+    updateLayoutMetrics();
     bindStaticEvents();
     bindLifecycleEvents();
     render();
+    switchTab(activeTab);
     startRefreshLoop();
   } catch (error) {
     safeText('boot_status', 'Подключение не удалось.');
@@ -180,9 +210,14 @@ function startRefreshLoop() {
           const cached = loadTelegramSession();
           if (cached.initData) {
             state = await api('/api/auth/telegram', 'POST', { init_data: cached.initData });
-            telegramId = String(state?.player?.telegram_id || telegramId);
-            saveTelegramSession(telegramId, username || cached.username, cached.initData);
+          } else if (cached.telegramId) {
+            state = await api('/api/auth', 'POST', { telegram_id: cached.telegramId, username: cached.username || 'Игрок' });
+          }
+          if (state) {
+            telegramId = String(state?.player?.telegram_id || cached.telegramId || telegramId);
+            saveTelegramSession(telegramId, username || cached.username, cached.initData || '');
             render();
+            updateLayoutMetrics();
           }
         } catch (rehydrateError) {
           console.error('rehydrate error', rehydrateError);
@@ -194,7 +229,7 @@ function startRefreshLoop() {
 
 function bindStaticEvents() {
   document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab, { scrollToTop: true }));
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.querySelectorAll('.segment').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.filter === buildingFilter);
@@ -215,36 +250,16 @@ function applyActiveTab(tab) {
   document.querySelectorAll('.nav-btn').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
 }
 
-function switchTab(tab, options = {}) {
-  activeTab = tab;
+function switchTab(tab) {
+  activeTab = tab || 'buildings';
   localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
-  if (options.scrollToTop) {
-    window.scrollTo(0, 0);
-  }
+  updateLayoutMetrics();
+  requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
 }
 
-function getScrollRoot() {
-  return document.scrollingElement || document.documentElement || document.body;
-}
-
-function getScrollY() {
-  return window.scrollY || getScrollRoot().scrollTop || 0;
-}
-
-function setScrollY(value) {
-  const y = Math.max(0, Number(value) || 0);
-  window.scrollTo(0, y);
-  const root = getScrollRoot();
-  if (root) root.scrollTop = y;
-  if (document.body) document.body.scrollTop = y;
-}
-
-function render(options = {}) {
+function render() {
   if (!state?.player) return;
-  const keepScroll = options.keepScroll !== false;
-  const prevScrollY = keepScroll ? getScrollY() : 0;
-
   renderTop();
   renderQuickActions();
   renderBuildings();
@@ -255,16 +270,14 @@ function render(options = {}) {
   renderAchievements();
   renderLeaderboard();
   applyActiveTab(activeTab);
-
-  if (keepScroll) {
-    requestAnimationFrame(() => setScrollY(prevScrollY));
-  }
+  requestAnimationFrame(updateLayoutMetrics);
 }
 
 function renderTop() {
   const p = state.player;
+  const optimisticGold = minePendingVisualIncomes.reduce((sum, income) => sum + Number(income || 0), 0);
   safeHtml('top_stats', `
-    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(p.gold)}</div><div class="mini-sub">Баланс</div></div>
+    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(Number(p.gold || 0) + optimisticGold)}</div><div class="mini-sub">Баланс</div></div>
     <div class="mini-card"><div class="mini-label">Дирхамы</div><div class="mini-value">${fmt(p.dirhams, 0)}</div><div class="mini-sub">Редкая валюта</div></div>
     <div class="mini-card"><div class="mini-label">Склад</div><div class="mini-value">${fmt(p.storage_used)} / ${fmt(p.storage_capacity)}</div><div class="mini-sub">Заполненность</div></div>
     <div class="mini-card"><div class="mini-label">Звание</div><div class="mini-value">${p.title_name}</div><div class="mini-sub">${fmt(p.rank_score)} рейтинга</div></div>
@@ -441,10 +454,12 @@ function renderCaravans() {
   if (available.some((r) => r.key === prevResource)) $('resource_select').value = prevResource;
 
   updateCaravanPreview();
-  ['route_select', 'guard_select', 'resource_select', 'caravan_amount'].forEach((id) => {
-    const event = id === 'caravan_amount' ? 'input' : 'change';
-    $(id)?.addEventListener(event, updateCaravanPreview);
+  ['route_select', 'guard_select', 'resource_select'].forEach((id) => {
+    const el = $(id);
+    if (el) el.onchange = updateCaravanPreview;
   });
+  const caravanAmountEl = $('caravan_amount');
+  if (caravanAmountEl) caravanAmountEl.oninput = updateCaravanPreview;
 
   const selectedResource = available.find((r) => r.key === ($('resource_select')?.value || available[0]?.key));
   const maxAmount = Number(selectedResource?.amount || 0);
@@ -689,7 +704,9 @@ function mineClick(event) {
   mineQueuedClicks += 1;
   mineVisualSeed += 1;
 
-  const instantIncome = Number(state?.player?.mine_income || 1);
+  const predictedIncome = Number(state?.player?.mine_income || 1);
+  minePendingVisualIncomes.push(predictedIncome);
+
   const rect = btn.getBoundingClientRect();
   const hasPointer = event && typeof event.clientX === 'number' && typeof event.clientY === 'number';
   const xPercent = hasPointer
@@ -699,7 +716,8 @@ function mineClick(event) {
     ? Math.max(28, Math.min(rect.height - 22, rect.bottom - event.clientY))
     : 56 + (mineVisualSeed % 4) * 10;
 
-  spawnMineFloat(`+${fmt(instantIncome)}`, { xPercent, bottomOffset });
+  spawnMineFloat(`+${fmt(predictedIncome)}`, { xPercent, bottomOffset });
+  renderTop();
   runMineQueue();
 }
 
@@ -713,6 +731,9 @@ async function runMineQueue() {
       mineQueuedClicks -= 1;
 
       const nextState = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
+      if (minePendingVisualIncomes.length > 0) {
+        minePendingVisualIncomes.shift();
+      }
       state = nextState;
 
       const click = nextState?.mine_click;
@@ -724,10 +745,11 @@ async function runMineQueue() {
       renderMine();
     }
   } catch (error) {
+    minePendingVisualIncomes = [];
+    renderTop();
     showError(error);
   } finally {
     mineWorkerRunning = false;
-    render();
     if (mineQueuedClicks > 0) {
       runMineQueue();
     }
