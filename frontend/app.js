@@ -120,29 +120,9 @@ async function bootstrap() {
     $('boot_retry')?.addEventListener('click', bootstrap, { once: true });
   }
 }
+
     
 
-    if (!state) {
-      safeText('boot_status', 'Локальный вход…');
-      telegramId = localStorage.getItem('steppe_local_id') || `local-${Math.random().toString(36).slice(2, 10)}`;
-      username = localStorage.getItem('steppe_local_name') || 'Игрок';
-      localStorage.setItem('steppe_local_id', telegramId);
-      localStorage.setItem('steppe_local_name', username);
-      state = await api('/api/auth', 'POST', { telegram_id: telegramId, username });
-    }
-
-    $('boot')?.classList.add('hidden');
-    $('app')?.classList.remove('hidden');
-    bindStaticEvents();
-    render();
-    startRefreshLoop();
-  } catch (error) {
-    safeText('boot_status', 'Подключение не удалось.');
-    safeText('boot_error', error?.message || String(error));
-    $('boot_retry')?.classList.remove('hidden');
-    $('boot_retry')?.addEventListener('click', bootstrap, { once: true });
-  }
-}
 
 function startRefreshLoop() {
   if (refreshTimer) clearInterval(refreshTimer);
