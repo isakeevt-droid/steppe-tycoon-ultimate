@@ -889,7 +889,7 @@ def claim_caravan(db: Session, telegram_id: str, caravan_id: int) -> dict:
             gold = _money(Decimal(str(gold)) * Decimal(str(1 + route["bonus_value"])))
         _add_gold(player, gold)
         player.total_caravans_success += 1
-        player.total_caravan_profit += gold
+        player.total_caravan_profit = round(float(player.total_caravan_profit or 0) + float(gold), 2)
         caravan.result_gold = gold
     db.commit()
     return _serialize_state(db, player)
