@@ -8,7 +8,7 @@ let activeTab = 'buildings';
 let buildingFilter = 'producing';
 let refreshTimer = null;
 let recentBuiltBuildingKey = null;
-let mineClickBusy = false;
+
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -546,22 +546,57 @@ async function sendCaravan() {
   await doAction('/api/caravan/send', { telegram_id: telegramId, route_key: routeKey, guard_level: guardLevel, resource_key: resourceKey, amount });
   $('caravan_amount').value = '';
 }
-async function mineClick() {
-  if (mineClickBusy) return;
-  mineClickBusy = true;
+let mineBuffer = 0;
+let mineSending = false;
+
+function mineClick() {
+  const btn = $('mine_click_btn');
+
+  // анимация
+  btn.classList.remove('hit');
+  void btn.offsetWidth;
+  btn.classList.add('hit');
+
+  // буфер кликов
+  mineBuffer++;
+
+  // мгновенный визуальный отклик
+  if (state?.player) {
+    state.player.gold += state.player.mine_income || 1;
+    renderTop();
+  }
+
+  sendMineBatch();
+}
+async function sendMineBatch() {
+  if (mineSending || mineBuffer <= 0) return;
+
+  mineSending = true;
+
+  const clicks = mineBuffer;
+  mineBuffer = 0;
+
   try {
-    const btn = $('mine_click_btn');
-    btn.classList.remove('hit');
-    void btn.offsetWidth;
-    btn.classList.add('hit');
-    state = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
+    const res = await api('/api/mine/click', 'POST', {
+      telegram_id: telegramId
+    });
+
+    state = res;
     render();
+
     const click = state.mine_click;
-    if (click) spawnMineFloat(`${click.critical ? 'КРИТ ' : '+'}${fmt(click.income)}`);
-  } catch (error) {
-    showError(error);
+    if (click) {
+      spawnMineFloat(`${click.critical ? 'КРИТ ' : '+'}${fmt(click.income)}`);
+    }
+
+  } catch (e) {
+    console.error(e);
   } finally {
-    mineClickBusy = false;
+    mineSending = false;
+
+    if (mineBuffer > 0) {
+      sendMineBatch();
+    }
   }
 }
 
