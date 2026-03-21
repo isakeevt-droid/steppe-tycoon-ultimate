@@ -33,7 +33,7 @@ class Player(Base):
     total_caravan_profit: Mapped[float] = mapped_column(Float, default=0.0)
     total_clicks: Mapped[int] = mapped_column(Integer, default=0)
     total_dirhams_bought: Mapped[int] = mapped_column(Integer, default=0)
-    total_dirhams_spent: Mapped[int] = mapped_column(Float, default=0.0)
+    total_dirhams_spent: Mapped[float] = mapped_column(Float, default=0.0)
 
     dirhams_bought_today: Mapped[int] = mapped_column(Integer, default=0)
     dirham_day_key: Mapped[str] = mapped_column(String(16), default="")

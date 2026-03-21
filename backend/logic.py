@@ -36,6 +36,33 @@ from .economy import (
 from .models import Caravan, Player, PlayerAchievement, PlayerBuilding, PlayerResource, PlayerTitle, PlayerWorker
 
 
+
+EPSILON = 1e-6
+
+
+def _money(value: float) -> float:
+    return round(float(value or 0.0), 2)
+
+
+def _gold_lt(current: float, required: float) -> bool:
+    return _money(current) + EPSILON < _money(required)
+
+
+def _add_gold(player: Player, amount: float) -> float:
+    amount = _money(amount)
+    player.gold = _money(player.gold + amount)
+    player.total_gold_earned = _money(player.total_gold_earned + amount)
+    return amount
+
+
+def _spend_gold(player: Player, amount: float) -> float:
+    amount = _money(amount)
+    if _gold_lt(player.gold, amount):
+        raise HTTPException(status_code=400, detail="Недостаточно золота")
+    player.gold = _money(player.gold - amount)
+    player.total_gold_spent = _money(player.total_gold_spent + amount)
+    return amount
+
 def _get_player(db: Session, telegram_id: str) -> Player:
     player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
     if not player:
@@ -256,7 +283,7 @@ def tick_player(db: Session, player: Player) -> None:
             continue
         resources[cfg["resource_key"]].amount += actual
         storage_used += actual
-        player.total_resources_produced += actual
+        player.total_resources_produced = round(float(player.total_resources_produced or 0.0) + float(actual), 4)
 
     # passive processing: processing buildings always convert while there is input and free space
     for pb in player.buildings:
@@ -276,7 +303,7 @@ def tick_player(db: Session, player: Player) -> None:
             continue
         input_res.amount -= amount
         output_res.amount += amount
-        player.total_resources_processed += amount
+        player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
 
     # automation: faster auto-sale for production and faster auto-processing + auto-sale for processing
     auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 1.0))
@@ -325,7 +352,7 @@ def tick_player(db: Session, player: Player) -> None:
                 if extra_amount > 0:
                     input_res.amount -= extra_amount
                     output_res.amount += extra_amount
-                    player.total_resources_processed += extra_amount
+                    player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(extra_amount), 4)
 
             # Auto-sell processed goods while automation is active
             output_res = resources[cfg["output_key"]]
@@ -660,7 +687,7 @@ def upgrade_worker(db: Session, telegram_id: str, upgrade_key: str) -> dict:
     if player.dirhams < cfg["cost_dirhams"]:
         raise HTTPException(status_code=400, detail="Недостаточно дирхамов")
     player.dirhams -= cfg["cost_dirhams"]
-    player.total_dirhams_spent += cfg["cost_dirhams"]
+    player.total_dirhams_spent = _money(player.total_dirhams_spent + cfg["cost_dirhams"])
     src.count -= 1
     dst.count += 1
     db.commit()
@@ -685,7 +712,7 @@ def process_resources(db: Session, telegram_id: str, recipe_key: str, amount: fl
         raise HTTPException(status_code=400, detail="Недостаточно места на складе")
     in_res.amount -= amount
     out_res.amount += amount
-    player.total_resources_processed += amount
+    player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
     db.commit()
     return _serialize_state(db, player)
 
@@ -785,7 +812,7 @@ def toggle_building_automation(db: Session, telegram_id: str, building_key: str)
             if player.dirhams < cost:
                 raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
             player.dirhams -= cost
-            player.total_dirhams_spent += cost
+            player.total_dirhams_spent = _money(player.total_dirhams_spent + cost)
             pb.auto_mode = "sell"
             pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
     else:
@@ -794,7 +821,7 @@ def toggle_building_automation(db: Session, telegram_id: str, building_key: str)
             if player.dirhams < cost:
                 raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
             player.dirhams -= cost
-            player.total_dirhams_spent += cost
+            player.total_dirhams_spent = _money(player.total_dirhams_spent + cost)
             pb.auto_mode = "process"
             pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
         elif pb.auto_mode == "process":
@@ -834,7 +861,7 @@ def send_caravan(db: Session, telegram_id: str, route_key: str, guard_level: str
         duration_seconds = max(60, int(duration_seconds * (1 - route["bonus_value"])))
     resource.amount -= amount
     player.dirhams -= guard["cost_dirhams"]
-    player.total_dirhams_spent += guard["cost_dirhams"]
+    player.total_dirhams_spent = _money(player.total_dirhams_spent + guard["cost_dirhams"])
     player.total_caravans_sent += 1
     db.add(Caravan(player=player, route_key=route_key, guard_level=guard_level, cargo_json=json.dumps({resource_key: amount}, ensure_ascii=False), cargo_value=_money_float(cargo_value), expected_profit=_money_float(expected_profit), risk_percent=risk, ends_at=now_utc() + timedelta(seconds=duration_seconds), status="traveling"))
     db.commit()
