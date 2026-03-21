@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 import random
 
 from .content import BUILDINGS, WORKERS, RESOURCES, TITLES, SETTINGS
+
+MONEY_STEP = Decimal("0.01")
+
+
+def money(value: object) -> Decimal:
+    return Decimal(str(value)).quantize(MONEY_STEP, rounding=ROUND_HALF_UP)
 
 
 def now_utc() -> datetime:
@@ -19,17 +26,17 @@ def calculate_storage_capacity(storage_level: int) -> float:
     return SETTINGS["start_storage"] * (1 + (storage_level - 1) * SETTINGS["storage_capacity_multiplier"])
 
 
-def calculate_storage_upgrade_cost(storage_level: int) -> float:
-    return SETTINGS["storage_upgrade_base_cost"] * (SETTINGS["storage_upgrade_growth"] ** (storage_level - 1))
+def calculate_storage_upgrade_cost(storage_level: int) -> Decimal:
+    return money(SETTINGS["storage_upgrade_base_cost"] * (SETTINGS["storage_upgrade_growth"] ** (storage_level - 1)))
 
 
-def calculate_building_price(building_key: str, owned: int) -> float:
+def calculate_building_price(building_key: str, owned: int) -> Decimal:
     item = BUILDINGS[building_key]
-    return item["base_price"] * (item["price_growth"] ** owned)
+    return money(item["base_price"] * (item["price_growth"] ** owned))
 
 
-def calculate_worker_hire_cost(worker_key: str) -> float:
-    return WORKERS[worker_key]["hire_cost"]
+def calculate_worker_hire_cost(worker_key: str) -> Decimal:
+    return money(WORKERS[worker_key]["hire_cost"])
 
 
 def calculate_worker_bonus(worker_counts: dict[str, int]) -> float:
@@ -39,11 +46,11 @@ def calculate_worker_bonus(worker_counts: dict[str, int]) -> float:
     return total
 
 
-def calculate_worker_salary_per_minute(worker_counts: dict[str, int]) -> float:
-    total = 0.0
+def calculate_worker_salary_per_minute(worker_counts: dict[str, int]) -> Decimal:
+    total = Decimal("0")
     for key, count in worker_counts.items():
-        total += WORKERS[key]["salary_per_minute"] * count
-    return total
+        total += Decimal(str(WORKERS[key]["salary_per_minute"])) * Decimal(count)
+    return money(total)
 
 
 def calculate_global_bonus_pct(achievement_bonus_pct: float, title_bonus_pct: float) -> float:
@@ -68,11 +75,11 @@ def calculate_processing_output_per_second(level: int, batch_size: float, worker
     return (batch_size * level * (1 + worker_bonus) * (1 + global_bonus) * penalty) / 120.0
 
 
-def calculate_market_price(resource_key: str, market_seed: int) -> float:
-    base = RESOURCES[resource_key]["base_price"]
+def calculate_market_price(resource_key: str, market_seed: int) -> Decimal:
+    base = Decimal(str(RESOURCES[resource_key]["base_price"]))
     random.seed(f"{resource_key}:{market_seed}")
-    multiplier = random.uniform(0.85, 1.15)
-    return round(base * multiplier, 2)
+    multiplier = Decimal(str(random.uniform(0.85, 1.15)))
+    return money(base * multiplier)
 
 
 def calculate_rank_score(player, total_building_levels: int, worker_count: int) -> float:
@@ -111,8 +118,8 @@ def get_next_title(title_key: str):
     return None
 
 
-def calculate_dirham_buy_price(bought_today: int) -> float:
-    return SETTINGS["dirham_price_base"] * (SETTINGS["dirham_price_growth"] ** bought_today)
+def calculate_dirham_buy_price(bought_today: int) -> Decimal:
+    return money(SETTINGS["dirham_price_base"] * (SETTINGS["dirham_price_growth"] ** bought_today))
 
 
 def calculate_mine_crit_chance(pickaxe_level: int) -> float:
@@ -123,21 +130,21 @@ def calculate_mine_crit_multiplier(mine_level: int) -> float:
     return 1.5 + (mine_level - 1) * 0.06
 
 
-def calculate_mine_click_income(level: int, pickaxe_level: int, achievement_bonus: float, title_bonus: float) -> tuple[float, float, float, float]:
+def calculate_mine_click_income(level: int, pickaxe_level: int, achievement_bonus: float, title_bonus: float) -> tuple[Decimal, Decimal, float, float]:
     global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus)
-    base_tap = SETTINGS["mine_click_base"] * (1 + (level - 1) * 0.03) * (1 + global_bonus)
+    base_tap = Decimal(str(SETTINGS["mine_click_base"])) * Decimal(str(1 + (level - 1) * 0.03)) * Decimal(str(1 + global_bonus))
     crit_chance = calculate_mine_crit_chance(pickaxe_level)
     crit_multiplier = calculate_mine_crit_multiplier(level)
-    average_tap = base_tap * (1 + (crit_chance / 100.0) * (crit_multiplier - 1))
-    return round(base_tap, 2), round(average_tap, 2), round(crit_chance, 2), round(crit_multiplier, 2)
+    average_tap = base_tap * (Decimal("1") + (Decimal(str(crit_chance)) / Decimal("100")) * (Decimal(str(crit_multiplier)) - Decimal("1")))
+    return money(base_tap), money(average_tap), round(crit_chance, 2), round(crit_multiplier, 2)
 
 
-def calculate_mine_upgrade_cost(level: int) -> float:
-    return SETTINGS["mine_upgrade_cost_base"] * (SETTINGS["mine_upgrade_cost_growth"] ** (level - 1))
+def calculate_mine_upgrade_cost(level: int) -> Decimal:
+    return money(SETTINGS["mine_upgrade_cost_base"] * (SETTINGS["mine_upgrade_cost_growth"] ** (level - 1)))
 
 
-def calculate_pickaxe_upgrade_cost(level: int) -> float:
-    return SETTINGS["mine_pickaxe_cost_base"] * (SETTINGS["mine_pickaxe_cost_growth"] ** level)
+def calculate_pickaxe_upgrade_cost(level: int) -> Decimal:
+    return money(SETTINGS["mine_pickaxe_cost_base"] * (SETTINGS["mine_pickaxe_cost_growth"] ** level))
 
 
 def calculate_auto_activation_cost(building_level: int) -> int:

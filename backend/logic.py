@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 from datetime import timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from .economy import (
     calculate_worker_salary_per_minute,
     determine_title_key,
     get_day_key,
+    money,
     get_next_title,
     get_title_bonus_pct,
     now_utc,
@@ -163,24 +165,33 @@ def _achievement_bonus_pct(player: Player) -> float:
 def _market_seed() -> int:
     return int(now_utc().timestamp() // 600)
 
-def _money(value: float) -> float:
-    return round(float(value), 2)
+
+def _money(value: object):
+    return money(value)
 
 
-def _has_enough_gold(player: Player, cost: float) -> bool:
-    return _money(player.gold) + 1e-6 >= _money(cost)
+def _money_float(value: object) -> float:
+    return float(_money(value))
 
 
-def _add_gold(player: Player, amount: float) -> None:
-    amount = _money(amount)
-    player.gold = _money(player.gold + amount)
-    player.total_gold_earned = _money(player.total_gold_earned + amount)
+def _mul_money(left: object, right: object):
+    return _money(Decimal(str(left)) * Decimal(str(right)))
 
 
-def _spend_gold(player: Player, amount: float) -> None:
-    amount = _money(amount)
-    player.gold = _money(player.gold - amount)
-    player.total_gold_spent = _money(player.total_gold_spent + amount)
+def _has_enough_gold(player: Player, cost: object) -> bool:
+    return _money(player.gold) >= _money(cost)
+
+
+def _add_gold(player: Player, amount: object) -> None:
+    amount_money = _money(amount)
+    player.gold = _money_float(_money(player.gold) + amount_money)
+    player.total_gold_earned = _money_float(_money(player.total_gold_earned) + amount_money)
+
+
+def _spend_gold(player: Player, amount: object) -> None:
+    amount_money = _money(amount)
+    player.gold = _money_float(_money(player.gold) - amount_money)
+    player.total_gold_spent = _money_float(_money(player.total_gold_spent) + amount_money)
 
 
 def _auto_active(pb: PlayerBuilding, now=None) -> bool:
@@ -213,10 +224,10 @@ def tick_player(db: Session, player: Player) -> None:
     worker_counts = _worker_counts(player)
     worker_bonus = calculate_worker_bonus(worker_counts)
     salary_per_minute = calculate_worker_salary_per_minute(worker_counts)
-    salary_due = salary_per_minute * (elapsed / 60.0)
-    payroll_ok = player.gold >= salary_due
+    salary_due = _money(Decimal(str(salary_per_minute)) * Decimal(str(elapsed / 60.0)))
+    payroll_ok = _money(player.gold) >= salary_due
     if salary_due > 0:
-        paid = _money(min(player.gold, salary_due))
+        paid = _money(min(_money(player.gold), salary_due))
         if paid > 0:
             _spend_gold(player, paid)
 
@@ -295,7 +306,7 @@ def tick_player(db: Session, player: Player) -> None:
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["resource_key"], market_seed)
-            total = _money(sell_amount * market_price)
+            total = _mul_money(sell_amount, market_price)
             res.amount -= sell_amount
             _add_gold(player, total)
             continue
@@ -331,7 +342,7 @@ def tick_player(db: Session, player: Player) -> None:
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["output_key"], market_seed)
-            total = _money(sell_amount * market_price)
+            total = _mul_money(sell_amount, market_price)
             output_res.amount -= sell_amount
             _add_gold(player, total)
 
@@ -391,7 +402,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
     rank_score = calculate_rank_score(player, total_building_levels=sum(x.level for x in player.buildings), worker_count=sum(x.count for x in player.workers))
     capacity = calculate_storage_capacity(player.storage_level)
     used = _storage_used(player)
-    market_prices = {k: calculate_market_price(k, market_seed) for k in RESOURCES}
+    market_prices = {k: _money_float(calculate_market_price(k, market_seed)) for k in RESOURCES}
     worker_counts = _worker_counts(player)
     worker_bonus = calculate_worker_bonus(worker_counts)
     worker_salary_per_minute = calculate_worker_salary_per_minute(worker_counts)
@@ -405,7 +416,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
     notifications = []
     for pb in sorted(player.buildings, key=lambda x: x.building_key):
         cfg = BUILDINGS[pb.building_key]
-        price = round(calculate_building_price(pb.building_key, pb.level), 2)
+        price = _money_float(calculate_building_price(pb.building_key, pb.level))
         auto_active = _auto_active(pb, now)
         auto_seconds = max(0, int((pb.auto_until - now).total_seconds())) if pb.auto_until else 0
         auto_kind = "sell" if cfg["category"] == "production" else pb.auto_mode
@@ -531,16 +542,16 @@ def _serialize_state(db: Session, player: Player) -> dict:
             "total_bonus_pct": round(total_bonus, 2),
             "mine_level": player.manual_mine_level,
             "pickaxe_level": player.mine_pickaxe_level,
-            "mine_upgrade_cost": round(calculate_mine_upgrade_cost(player.manual_mine_level), 2),
-            "pickaxe_upgrade_cost": round(calculate_pickaxe_upgrade_cost(player.mine_pickaxe_level), 2),
-            "mine_base_tap": base_tap,
-            "mine_income": avg_tap,
+            "mine_upgrade_cost": _money_float(calculate_mine_upgrade_cost(player.manual_mine_level)),
+            "pickaxe_upgrade_cost": _money_float(calculate_pickaxe_upgrade_cost(player.mine_pickaxe_level)),
+            "mine_base_tap": _money_float(base_tap),
+            "mine_income": _money_float(avg_tap),
             "mine_crit_chance": crit_chance,
             "mine_crit_multiplier": crit_mult,
-            "dirham_price": round(calculate_dirham_buy_price(player.dirhams_bought_today), 2),
+            "dirham_price": _money_float(calculate_dirham_buy_price(player.dirhams_bought_today)),
             "dirham_daily_limit": SETTINGS["dirham_daily_limit"],
             "dirhams_bought_today": player.dirhams_bought_today,
-            "storage_upgrade_cost": round(calculate_storage_upgrade_cost(player.storage_level), 2),
+            "storage_upgrade_cost": _money_float(calculate_storage_upgrade_cost(player.storage_level)),
             "worker_bonus_pct": round(worker_bonus * 100, 1),
             "worker_salary_per_minute": round(worker_salary_per_minute, 2),
             "worker_total_count": worker_total_count,
@@ -571,7 +582,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
         },
         "buildings": buildings,
         "resources": resources,
-        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": WORKERS[pw.worker_key]["hire_cost"], "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"], "can_fire": pw.count > 0} for pw in sorted(player.workers, key=lambda x: x.worker_key)],
+        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": _money_float(calculate_worker_hire_cost(pw.worker_key)), "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"], "can_fire": pw.count > 0} for pw in sorted(player.workers, key=lambda x: x.worker_key)],
         "worker_upgrades": [{
             "key": upgrade_key,
             "from_key": cfg["from"],
@@ -687,7 +698,7 @@ def sell_resource(db: Session, telegram_id: str, resource_key: str, amount: floa
     res = _get_or_create_resource(player, resource_key)
     if res.amount < amount:
         raise HTTPException(status_code=400, detail="Недостаточно ресурса")
-    total = _money(amount * calculate_market_price(resource_key, _market_seed()))
+    total = _mul_money(amount, calculate_market_price(resource_key, _market_seed()))
     res.amount -= amount
     _add_gold(player, total)
     db.commit()
@@ -727,12 +738,12 @@ def mine_click(db: Session, telegram_id: str) -> dict:
     tick_player(db, player)
     base_tap, _, crit_chance, crit_mult = calculate_mine_click_income(player.manual_mine_level, player.mine_pickaxe_level, _achievement_bonus_pct(player), get_title_bonus_pct(player.title_key))
     is_crit = random.random() < (crit_chance / 100.0)
-    income = round(base_tap * (crit_mult if is_crit else 1.0), 2)
+    income = _mul_money(base_tap, crit_mult if is_crit else 1.0)
     _add_gold(player, income)
     player.total_clicks += 1
     db.commit()
     state = _serialize_state(db, player)
-    state["mine_click"] = {"income": income, "critical": is_crit}
+    state["mine_click"] = {"income": _money_float(income), "critical": is_crit}
     return state
 
 
@@ -815,9 +826,9 @@ def send_caravan(db: Session, telegram_id: str, route_key: str, guard_level: str
     if player.dirhams < guard["cost_dirhams"]:
         raise HTTPException(status_code=400, detail="Недостаточно дирхамов")
     route = CARAVAN_ROUTES[route_key]
-    cargo_value = amount * calculate_market_price(resource_key, _market_seed())
+    cargo_value = _mul_money(amount, calculate_market_price(resource_key, _market_seed()))
     risk = max(0.0, route["risk_percent"] - guard["risk_reduction"])
-    expected_profit = cargo_value * (1 + route["profit_bonus"])
+    expected_profit = _money(Decimal(str(cargo_value)) * Decimal(str(1 + route["profit_bonus"])))
     duration_seconds = route["duration_seconds"]
     if route.get("bonus_type") == "time_reduction":
         duration_seconds = max(60, int(duration_seconds * (1 - route["bonus_value"])))
@@ -825,7 +836,7 @@ def send_caravan(db: Session, telegram_id: str, route_key: str, guard_level: str
     player.dirhams -= guard["cost_dirhams"]
     player.total_dirhams_spent += guard["cost_dirhams"]
     player.total_caravans_sent += 1
-    db.add(Caravan(player=player, route_key=route_key, guard_level=guard_level, cargo_json=json.dumps({resource_key: amount}, ensure_ascii=False), cargo_value=cargo_value, expected_profit=round(expected_profit, 2), risk_percent=risk, ends_at=now_utc() + timedelta(seconds=duration_seconds), status="traveling"))
+    db.add(Caravan(player=player, route_key=route_key, guard_level=guard_level, cargo_json=json.dumps({resource_key: amount}, ensure_ascii=False), cargo_value=_money_float(cargo_value), expected_profit=_money_float(expected_profit), risk_percent=risk, ends_at=now_utc() + timedelta(seconds=duration_seconds), status="traveling"))
     db.commit()
     return _serialize_state(db, player)
 
@@ -848,7 +859,7 @@ def claim_caravan(db: Session, telegram_id: str, caravan_id: int) -> dict:
     if success:
         gold = _money(caravan.expected_profit)
         if route.get("bonus_type") == "gold_bonus":
-            gold = _money(gold * (1 + route["bonus_value"]))
+            gold = _money(Decimal(str(gold)) * Decimal(str(1 + route["bonus_value"])))
         _add_gold(player, gold)
         player.total_caravans_success += 1
         player.total_caravan_profit += gold
