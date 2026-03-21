@@ -8,7 +8,9 @@ let activeTab = 'buildings';
 let buildingFilter = 'producing';
 let refreshTimer = null;
 let recentBuiltBuildingKey = null;
-
+let mineQueuedClicks = 0;
+let mineWorkerRunning = false;
+let mineVisualSeed = 0;
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -546,68 +548,75 @@ async function sendCaravan() {
   await doAction('/api/caravan/send', { telegram_id: telegramId, route_key: routeKey, guard_level: guardLevel, resource_key: resourceKey, amount });
   $('caravan_amount').value = '';
 }
-let mineBuffer = 0;
-let mineSending = false;
-
-function mineClick() {
+function mineClick(event) {
   const btn = $('mine_click_btn');
+  if (!btn) return;
 
-  // анимация
   btn.classList.remove('hit');
   void btn.offsetWidth;
   btn.classList.add('hit');
 
-  // буфер кликов
-  mineBuffer++;
+  mineQueuedClicks += 1;
+  mineVisualSeed += 1;
 
-  // мгновенный визуальный отклик
-  if (state?.player) {
-    state.player.gold += state.player.mine_income || 1;
-    renderTop();
-  }
+  const instantIncome = Number(state?.player?.mine_income || 1);
+  const rect = btn.getBoundingClientRect();
+  const hasPointer = event && typeof event.clientX === 'number' && typeof event.clientY === 'number';
+  const xPercent = hasPointer
+    ? Math.max(18, Math.min(82, ((event.clientX - rect.left) / rect.width) * 100))
+    : 50 + ((mineVisualSeed % 5) - 2) * 8;
+  const bottomOffset = hasPointer
+    ? Math.max(28, Math.min(rect.height - 22, rect.bottom - event.clientY))
+    : 56 + (mineVisualSeed % 4) * 10;
 
-  sendMineBatch();
+  spawnMineFloat(`+${fmt(instantIncome)}`, { xPercent, bottomOffset });
+  runMineQueue();
 }
-async function sendMineBatch() {
-  if (mineSending || mineBuffer <= 0) return;
 
-  mineSending = true;
+async function runMineQueue() {
+  if (mineWorkerRunning || mineQueuedClicks <= 0) return;
 
-  const clicks = mineBuffer;
-  mineBuffer = 0;
+  mineWorkerRunning = true;
+  let processed = 0;
 
   try {
-    const res = await api('/api/mine/click', 'POST', {
-      telegram_id: telegramId
-    });
+    while (mineQueuedClicks > 0) {
+      mineQueuedClicks -= 1;
+      processed += 1;
 
-    state = res;
-    render();
+      const nextState = await api('/api/mine/click', 'POST', { telegram_id: telegramId });
+      state = nextState;
 
-    const click = state.mine_click;
-    if (click) {
-      spawnMineFloat(`${click.critical ? 'КРИТ ' : '+'}${fmt(click.income)}`);
+      const click = nextState?.mine_click;
+      if (click?.critical) {
+        spawnMineFloat(`КРИТ ${fmt(click.income)}`, { critical: true });
+      }
+
+      if (processed % 4 === 0 || mineQueuedClicks === 0) {
+        renderTop();
+      }
     }
-
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    showError(error);
   } finally {
-    mineSending = false;
-
-    if (mineBuffer > 0) {
-      sendMineBatch();
+    mineWorkerRunning = false;
+    render();
+    if (mineQueuedClicks > 0) {
+      runMineQueue();
     }
   }
 }
 
-function spawnMineFloat(text) {
+function spawnMineFloat(text, options = {}) {
   const layer = $('mine_float_layer');
   if (!layer) return;
   const el = document.createElement('div');
-  el.className = 'mine-float';
+  el.className = `mine-float${options.critical ? ' is-crit' : ''}`;
   el.textContent = text;
+  el.style.setProperty('--x', `${options.xPercent ?? 50}%`);
+  el.style.setProperty('--y', `${options.bottomOffset ?? 46}px`);
   layer.appendChild(el);
-  setTimeout(() => el.remove(), 850);
+  setTimeout(() => el.remove(), options.critical ? 920 : 720);
 }
 
 window.buyBuilding = buyBuilding;

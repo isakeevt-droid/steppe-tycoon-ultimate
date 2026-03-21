@@ -70,13 +70,14 @@ button, input, select { font: inherit; }
 .meta-row .left { color: var(--muted); }
 .mine-wrap { position: relative; background: linear-gradient(180deg, #0c1f3d, #0a1830); border: 1px solid var(--line); border-radius: 22px; padding: 14px; }
 .mine-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-.mine-button { width: 100%; min-height: 160px; border-radius: 24px; border: 1px solid rgba(210,154,87,0.48); background: radial-gradient(circle at 50% 25%, rgba(210,154,87,0.22), rgba(210,154,87,0.08)); color: var(--text); display: grid; place-items: center; gap: 6px; padding: 20px; position: relative; overflow: hidden; }
-.mine-button.hit { transform: scale(0.985); }
+.mine-button { width: 100%; min-height: 160px; border-radius: 24px; border: 1px solid rgba(210,154,87,0.48); background: radial-gradient(circle at 50% 25%, rgba(210,154,87,0.22), rgba(210,154,87,0.08)); color: var(--text); display: grid; place-items: center; gap: 6px; padding: 20px; position: relative; overflow: hidden; touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; transition: transform .07s ease, box-shadow .12s ease, border-color .12s ease; box-shadow: 0 10px 28px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04); }
+.mine-button.hit { transform: scale(0.972); box-shadow: 0 6px 16px rgba(0,0,0,0.26), 0 0 0 1px rgba(210,154,87,0.22); }
 .mine-icon { font-size: 46px; display: inline-block; }
-.mine-button.hit .mine-icon { animation: swing .24s ease-out; }
+.mine-button.hit .mine-icon { animation: swing .16s ease-out; }
 .mine-label { font-size: 18px; font-weight: 800; }
 .mine-float-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.mine-float { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); font-weight: 800; color: #fff3d7; text-shadow: 0 2px 12px rgba(0,0,0,0.45); animation: floatUp .85s ease-out forwards; }
+.mine-float { position: absolute; left: var(--x, 50%); bottom: var(--y, 46px); transform: translateX(-50%) translateY(6px) scale(0.9); font-weight: 800; color: #fff3d7; text-shadow: 0 2px 12px rgba(0,0,0,0.45); animation: floatUp .72s cubic-bezier(.18,.74,.24,1) forwards; white-space: nowrap; }
+.mine-float.is-crit { color: #ffd27f; font-size: 18px; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(255,192,93,0.28), 0 2px 12px rgba(0,0,0,0.48); }
 .bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: rgba(6,18,37,0.98); border-top: 1px solid rgba(255,255,255,0.07); z-index: 12; }
 .nav-btn { min-height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 10px; padding: 6px 4px; }
 .nav-btn.active { background: linear-gradient(180deg, rgba(210,154,87,0.34), rgba(210,154,87,0.12)); border-color: rgba(210,154,87,0.56); }
@@ -84,7 +85,7 @@ button, input, select { font: inherit; }
 .build-pop { animation: buildPop .55s ease-out; }
 .compact-top { margin-top: 10px; }
 @keyframes swing { 0% { transform: rotate(0deg); } 30% { transform: rotate(-16deg); } 100% { transform: rotate(0deg); } }
-@keyframes floatUp { 0% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -42px); } }
+@keyframes floatUp { 0% { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.88); } 18% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-42px) scale(1.05); } }
 @keyframes buildPop { 0% { transform: scale(0.96); opacity: 0.3; } 100% { transform: scale(1); opacity: 1; } }
 @media (min-width: 760px) {
   .main-content { width: min(760px, 100%); margin: 0 auto; }
