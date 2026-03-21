@@ -260,7 +260,7 @@ function renderTop() {
   const p = state.player;
   const optimisticGold = minePendingVisualIncomes.reduce((sum, income) => sum + Number(income || 0), 0);
   safeHtml('top_stats', `
-    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(Number(p.gold || 0) + optimisticGold)}</div><div class="mini-sub">Баланс</div></div>
+    <div class="mini-card"><div class="mini-label">Золото</div><div class="mini-value">${fmt(Number(p.gold || 0))}</div><div class="mini-sub">Баланс</div></div>
     <div class="mini-card"><div class="mini-label">Дирхамы</div><div class="mini-value">${fmt(p.dirhams, 0)}</div><div class="mini-sub">Редкая валюта</div></div>
     <div class="mini-card"><div class="mini-label">Склад</div><div class="mini-value">${fmt(p.storage_used)} / ${fmt(p.storage_capacity)}</div><div class="mini-sub">Заполненность</div></div>
     <div class="mini-card"><div class="mini-label">Звание</div><div class="mini-value">${p.title_name}</div><div class="mini-sub">${fmt(p.rank_score)} рейтинга</div></div>
