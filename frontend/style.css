@@ -1,7 +1,8 @@
 :root {
   --bg: #071327;
-  --bottom-nav-space: 110px;
+  --bottom-nav-space: 92px;
   --bottom-safe: env(safe-area-inset-bottom, 0px);
+  --app-height: 100dvh;
   --panel: #0d1d38;
   --panel-2: #12254a;
   --line: #1e3b6a;
@@ -12,10 +13,10 @@
   --good: #46cf8d;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+html, body { margin: 0; height: 100%; min-height: 100%; background: linear-gradient(180deg, #061225, #081528); color: var(--text); font-family: Inter, Arial, sans-serif; overflow: hidden; overscroll-behavior-y: none; }
 button, input, select { font: inherit; }
 .hidden { display: none !important; }
-.screen { min-height: 100dvh; }
+.screen { min-height: var(--app-height); }
 .boot { display: grid; place-items: center; padding: 24px; }
 .boot-card, .section-card, .mini-card, .building-card, .resource-card, .caravan-card, .upgrade-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
 .boot-card { width: min(420px, 100%); padding: 22px; }
@@ -30,7 +31,7 @@ button, input, select { font: inherit; }
 .mini-label { font-size: 12px; color: var(--muted); }
 .mini-value { font-size: 18px; font-weight: 800; margin-top: 4px; }
 .mini-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
-.main-content { padding: 12px 12px calc(var(--bottom-nav-space) + 14px); min-height: calc(100dvh - 1px); }
+.main-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; touch-action: pan-y; padding: 12px 12px calc(var(--bottom-nav-space) + var(--bottom-safe) + 14px); }
 .page { display: none; }
 .page.active { display: block; }
 .quick-actions, .card-list, .form-stack { display: grid; gap: 10px; }
@@ -80,7 +81,7 @@ button, input, select { font: inherit; }
 .mine-float-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .mine-float { position: absolute; left: var(--x, 50%); bottom: var(--y, 46px); transform: translateX(-50%) translateY(6px) scale(0.9); font-weight: 800; color: #fff3d7; text-shadow: 0 2px 12px rgba(0,0,0,0.45); animation: floatUp .72s cubic-bezier(.18,.74,.24,1) forwards; white-space: nowrap; }
 .mine-float.is-crit { color: #ffd27f; font-size: 18px; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(255,192,93,0.28), 0 2px 12px rgba(0,0,0,0.48); }
-.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px 10px calc(8px + var(--bottom-safe)); background: rgba(6,18,37,0.98); border-top: 1px solid rgba(255,255,255,0.07); z-index: 12; }
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: rgba(6,18,37,0.98); border-top: 1px solid rgba(255,255,255,0.07); z-index: 12; }
 .nav-btn { min-height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 10px; padding: 6px 4px; }
 .nav-btn.active { background: linear-gradient(180deg, rgba(210,154,87,0.34), rgba(210,154,87,0.12)); border-color: rgba(210,154,87,0.56); }
 .not-built { opacity: 0.88; }
@@ -131,7 +132,7 @@ button, input, select { font: inherit; }
   .topbar { padding: 12px 12px 10px; }
   .title { font-size: 24px; }
   .subtitle { font-size: 12px; }
-  .main-content { padding: 10px 10px calc(var(--bottom-nav-space) + 14px); }
+  .main-content { padding: 10px 10px calc(var(--bottom-nav-space) + var(--bottom-safe) + 14px); }
   .section-card, .building-card, .resource-card, .caravan-card, .upgrade-card, .mini-card, .info-card { border-radius: 16px; }
   .section-card, .building-card, .resource-card, .caravan-card, .upgrade-card { padding: 12px; }
   .quick-actions { grid-template-columns: 1fr; }
@@ -151,6 +152,7 @@ button, input, select { font: inherit; }
   .quick-amounts { grid-template-columns: 1fr 1fr 1fr; }
 }
 
-#app { min-height: 100dvh; }
+#app { min-height: var(--app-height); height: var(--app-height); display: flex; flex-direction: column; overflow: hidden; }
 body { position: relative; }
-.page.active { display: block; min-height: min-content; }
+.topbar { flex: 0 0 auto; }
+.bottom-nav { touch-action: manipulation; }

@@ -228,7 +228,7 @@ def tick_player(db: Session, player: Player) -> None:
         storage_used += actual
         player.total_resources_produced += actual
 
-    # passive processing: processing buildings always convert while there is input
+    # passive processing: processing buildings always convert while there is input and free space
     for pb in player.buildings:
         cfg = BUILDINGS[pb.building_key]
         if pb.level <= 0 or cfg["category"] != "processing":
@@ -240,6 +240,8 @@ def tick_player(db: Session, player: Player) -> None:
         input_res = resources[cfg["input_key"]]
         output_res = resources[cfg["output_key"]]
         amount = min(amount, input_res.amount)
+        free_space = max(0.0, capacity - storage_used)
+        amount = min(amount, free_space)
         if amount <= 0:
             continue
         input_res.amount -= amount
@@ -289,6 +291,8 @@ def tick_player(db: Session, player: Player) -> None:
                 input_res = resources[cfg["input_key"]]
                 output_res = resources[cfg["output_key"]]
                 extra_amount = min(extra_amount, input_res.amount)
+                free_space = max(0.0, capacity - storage_used)
+                extra_amount = min(extra_amount, free_space)
                 if extra_amount > 0:
                     input_res.amount -= extra_amount
                     output_res.amount += extra_amount
@@ -382,8 +386,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
 
     buildings = []
     notifications = []
-    building_order = {key: idx for idx, key in enumerate(BUILDINGS.keys())}
-    for pb in sorted(player.buildings, key=lambda x: building_order.get(x.building_key, 999)):
+    for pb in sorted(player.buildings, key=lambda x: x.building_key):
         cfg = BUILDINGS[pb.building_key]
         price = round(calculate_building_price(pb.building_key, pb.level), 2)
         auto_active = _auto_active(pb, now)
@@ -434,8 +437,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
         buildings.append(record)
 
     resources = []
-    resource_order = {key: idx for idx, key in enumerate(RESOURCES.keys())}
-    for pr in sorted(player.resources, key=lambda x: resource_order.get(x.resource_key, 999)):
+    for pr in sorted(player.resources, key=lambda x: x.resource_key):
         cfg = RESOURCES[pr.resource_key]
         resources.append({
             "key": pr.resource_key,
@@ -552,7 +554,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
         },
         "buildings": buildings,
         "resources": resources,
-        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": WORKERS[pw.worker_key]["hire_cost"], "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"], "can_fire": pw.count > 0} for pw in sorted(player.workers, key=lambda x: list(WORKERS.keys()).index(x.worker_key))],
+        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": WORKERS[pw.worker_key]["hire_cost"], "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"], "can_fire": pw.count > 0} for pw in sorted(player.workers, key=lambda x: x.worker_key)],
         "worker_upgrades": [{
             "key": upgrade_key,
             "from_key": cfg["from"],
@@ -580,8 +582,7 @@ def buy_building(db: Session, telegram_id: str, building_key: str) -> dict:
     tick_player(db, player)
     pb = next(x for x in player.buildings if x.building_key == building_key)
     price = calculate_building_price(building_key, pb.level)
-    price = round(price, 2)
-    if player.gold + 1e-9 < price:
+    if player.gold < price:
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     player.gold -= price
     player.total_gold_spent += price
@@ -596,8 +597,7 @@ def hire_worker(db: Session, telegram_id: str, worker_key: str) -> dict:
     player = _get_player(db, telegram_id)
     tick_player(db, player)
     price = calculate_worker_hire_cost(worker_key)
-    price = round(price, 2)
-    if player.gold + 1e-9 < price:
+    if player.gold < price:
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     player.gold -= price
     player.total_gold_spent += price
@@ -654,6 +654,9 @@ def process_resources(db: Session, telegram_id: str, recipe_key: str, amount: fl
     out_res = _get_or_create_resource(player, recipe["output_key"])
     if in_res.amount < amount:
         raise HTTPException(status_code=400, detail="Недостаточно сырья")
+    free_space = calculate_storage_capacity(player.storage_level) - _storage_used(player)
+    if free_space < amount:
+        raise HTTPException(status_code=400, detail="Недостаточно места на складе")
     in_res.amount -= amount
     out_res.amount += amount
     player.total_resources_processed += amount
@@ -683,8 +686,7 @@ def buy_dirham(db: Session, telegram_id: str) -> dict:
     if player.dirhams_bought_today >= SETTINGS["dirham_daily_limit"]:
         raise HTTPException(status_code=400, detail="Дневной лимит достигнут")
     price = calculate_dirham_buy_price(player.dirhams_bought_today)
-    price = round(price, 2)
-    if player.gold + 1e-9 < price:
+    if player.gold < price:
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     player.gold -= price
     player.total_gold_spent += price
@@ -699,8 +701,7 @@ def storage_upgrade(db: Session, telegram_id: str) -> dict:
     player = _get_player(db, telegram_id)
     tick_player(db, player)
     price = calculate_storage_upgrade_cost(player.storage_level)
-    price = round(price, 2)
-    if player.gold + 1e-9 < price:
+    if player.gold < price:
         raise HTTPException(status_code=400, detail="Недостаточно золота")
     player.gold -= price
     player.total_gold_spent += price
@@ -729,16 +730,14 @@ def mine_upgrade(db: Session, telegram_id: str, upgrade_type: str = "mine") -> d
     tick_player(db, player)
     if upgrade_type == "pickaxe":
         price = calculate_pickaxe_upgrade_cost(player.mine_pickaxe_level)
-        price = round(price, 2)
-        if player.gold + 1e-9 < price:
+        if player.gold < price:
             raise HTTPException(status_code=400, detail="Недостаточно золота")
         player.gold -= price
         player.total_gold_spent += price
         player.mine_pickaxe_level += 1
     else:
         price = calculate_mine_upgrade_cost(player.manual_mine_level)
-        price = round(price, 2)
-        if player.gold + 1e-9 < price:
+        if player.gold < price:
             raise HTTPException(status_code=400, detail="Недостаточно золота")
         player.gold -= price
         player.total_gold_spent += price

@@ -80,68 +80,53 @@ function getBuildingLevel(appState, key) {
   return Number((appState?.buildings || []).find((b) => b.key === key)?.level || 0);
 }
 
-
-function updateLayoutMetrics() {
-  const nav = document.querySelector('.bottom-nav');
-  const navHeight = nav ? Math.ceil(nav.getBoundingClientRect().height) : 110;
-  document.documentElement.style.setProperty('--bottom-nav-space', `${navHeight + 14}px`);
-}
-
 function saveTelegramSession(id, name, initData = '') {
   if (id) localStorage.setItem(TG_ID_CACHE_KEY, String(id));
   if (name) localStorage.setItem(TG_NAME_CACHE_KEY, String(name));
-  if (initData) {
-    sessionStorage.setItem(TG_INIT_CACHE_KEY, initData);
-    localStorage.setItem(TG_INIT_CACHE_KEY, initData);
-  }
+  if (initData) sessionStorage.setItem(TG_INIT_CACHE_KEY, initData);
 }
 
 function loadTelegramSession() {
-  const initData = sessionStorage.getItem(TG_INIT_CACHE_KEY) || localStorage.getItem(TG_INIT_CACHE_KEY) || '';
   return {
     telegramId: localStorage.getItem(TG_ID_CACHE_KEY) || '',
     username: localStorage.getItem(TG_NAME_CACHE_KEY) || 'Игрок',
-    initData,
+    initData: sessionStorage.getItem(TG_INIT_CACHE_KEY) || '',
   };
 }
 
+function syncViewportLayout() {
+  const root = document.documentElement;
+  const tg = window.Telegram?.WebApp || null;
+  const viewportHeight = tg?.viewportStableHeight || tg?.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 0;
+  if (viewportHeight) root.style.setProperty('--app-height', `${Math.round(viewportHeight)}px`);
+  const nav = document.querySelector('.bottom-nav');
+  if (nav) root.style.setProperty('--bottom-nav-space', `${Math.ceil(nav.getBoundingClientRect().height)}px`);
+  root.style.setProperty('--bottom-safe', 'env(safe-area-inset-bottom, 0px)');
+}
+
 function bindLifecycleEvents() {
-  const refreshFromServer = async () => {
+  window.addEventListener('resize', syncViewportLayout, { passive: true });
+  window.addEventListener('orientationchange', syncViewportLayout, { passive: true });
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden && telegramId) {
+      try {
+        state = await api(`/api/state/${telegramId}`);
+        render();
+      } catch (error) {
+        console.error('resume refresh error', error);
+      }
+    }
+  });
+  window.addEventListener('pageshow', async () => {
     if (!telegramId) return;
     try {
       state = await api(`/api/state/${telegramId}`);
       render();
-      updateLayoutMetrics();
     } catch (error) {
-      console.error('resume refresh error', error);
-      try {
-        const cached = loadTelegramSession();
-        if (cached.initData) {
-          state = await api('/api/auth/telegram', 'POST', { init_data: cached.initData });
-        } else if (cached.telegramId) {
-          state = await api('/api/auth', 'POST', { telegram_id: cached.telegramId, username: cached.username || 'Игрок' });
-        } else {
-          throw error;
-        }
-        telegramId = String(state?.player?.telegram_id || cached.telegramId || telegramId);
-        username = cached.username || username || 'Игрок';
-        saveTelegramSession(telegramId, username, cached.initData || '');
-        render();
-        updateLayoutMetrics();
-      } catch (rehydrateError) {
-        console.error('rehydrate error', rehydrateError);
-      }
+      console.error('pageshow refresh error', error);
     }
-  };
-
-  document.addEventListener('visibilitychange', async () => {
-    if (!document.hidden && telegramId) await refreshFromServer();
   });
-  window.addEventListener('pageshow', refreshFromServer);
-  window.addEventListener('resize', updateLayoutMetrics);
-  window.addEventListener('orientationchange', updateLayoutMetrics);
 }
-
 
 async function bootstrap() {
   try {
@@ -151,6 +136,7 @@ async function bootstrap() {
     const tg = window.Telegram?.WebApp || null;
     if (tg) {
       try { tg.ready(); tg.expand(); } catch {}
+      try { tg.onEvent?.('viewportChanged', syncViewportLayout); } catch {}
     }
 
     const cached = loadTelegramSession();
@@ -182,10 +168,11 @@ async function bootstrap() {
 
     $('boot')?.classList.add('hidden');
     $('app')?.classList.remove('hidden');
-    updateLayoutMetrics();
     bindStaticEvents();
     bindLifecycleEvents();
+    syncViewportLayout();
     render();
+    syncViewportLayout();
     switchTab(activeTab);
     startRefreshLoop();
   } catch (error) {
@@ -210,14 +197,9 @@ function startRefreshLoop() {
           const cached = loadTelegramSession();
           if (cached.initData) {
             state = await api('/api/auth/telegram', 'POST', { init_data: cached.initData });
-          } else if (cached.telegramId) {
-            state = await api('/api/auth', 'POST', { telegram_id: cached.telegramId, username: cached.username || 'Игрок' });
-          }
-          if (state) {
-            telegramId = String(state?.player?.telegram_id || cached.telegramId || telegramId);
-            saveTelegramSession(telegramId, username || cached.username, cached.initData || '');
+            telegramId = String(state?.player?.telegram_id || telegramId);
+            saveTelegramSession(telegramId, username || cached.username, cached.initData);
             render();
-            updateLayoutMetrics();
           }
         } catch (rehydrateError) {
           console.error('rehydrate error', rehydrateError);
@@ -254,8 +236,9 @@ function switchTab(tab) {
   activeTab = tab || 'buildings';
   localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
-  updateLayoutMetrics();
-  requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+  const main = document.querySelector('.main-content');
+  if (main) main.scrollTop = 0; else window.scrollTo(0, 0);
+  syncViewportLayout();
 }
 
 function render() {
@@ -270,8 +253,9 @@ function render() {
   renderAchievements();
   renderLeaderboard();
   applyActiveTab(activeTab);
-  requestAnimationFrame(updateLayoutMetrics);
+  syncViewportLayout();
 }
+
 
 function renderTop() {
   const p = state.player;
@@ -454,12 +438,10 @@ function renderCaravans() {
   if (available.some((r) => r.key === prevResource)) $('resource_select').value = prevResource;
 
   updateCaravanPreview();
-  ['route_select', 'guard_select', 'resource_select'].forEach((id) => {
-    const el = $(id);
-    if (el) el.onchange = updateCaravanPreview;
+  ['route_select', 'guard_select', 'resource_select', 'caravan_amount'].forEach((id) => {
+    const event = id === 'caravan_amount' ? 'input' : 'change';
+    $(id)?.addEventListener(event, updateCaravanPreview);
   });
-  const caravanAmountEl = $('caravan_amount');
-  if (caravanAmountEl) caravanAmountEl.oninput = updateCaravanPreview;
 
   const selectedResource = available.find((r) => r.key === ($('resource_select')?.value || available[0]?.key));
   const maxAmount = Number(selectedResource?.amount || 0);
