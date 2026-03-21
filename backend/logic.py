@@ -346,6 +346,8 @@ def _serialize_state(db: Session, player: Player) -> dict:
     market_prices = {k: calculate_market_price(k, market_seed) for k in RESOURCES}
     worker_counts = _worker_counts(player)
     worker_bonus = calculate_worker_bonus(worker_counts)
+    worker_salary_per_minute = calculate_worker_salary_per_minute(worker_counts)
+    worker_total_count = sum(worker_counts.values())
     global_bonus = calculate_global_bonus_pct(achievement_bonus, title_bonus)
     resources_map = _resource_map(player)
     now = now_utc()
@@ -491,6 +493,9 @@ def _serialize_state(db: Session, player: Player) -> dict:
             "dirham_daily_limit": SETTINGS["dirham_daily_limit"],
             "dirhams_bought_today": player.dirhams_bought_today,
             "storage_upgrade_cost": round(calculate_storage_upgrade_cost(player.storage_level), 2),
+            "worker_bonus_pct": round(worker_bonus * 100, 1),
+            "worker_salary_per_minute": round(worker_salary_per_minute, 2),
+            "worker_total_count": worker_total_count,
             "total_gold_earned": round(player.total_gold_earned, 2),
             "total_gold_spent": round(player.total_gold_spent, 2),
             "total_resources_produced": round(player.total_resources_produced, 2),
@@ -505,7 +510,16 @@ def _serialize_state(db: Session, player: Player) -> dict:
         },
         "buildings": buildings,
         "resources": resources,
-        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": WORKERS[pw.worker_key]["hire_cost"], "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"]} for pw in sorted(player.workers, key=lambda x: x.worker_key)],
+        "workers": [{"key": pw.worker_key, "name": WORKERS[pw.worker_key]["name"], "count": pw.count, "hire_cost": WORKERS[pw.worker_key]["hire_cost"], "salary": WORKERS[pw.worker_key]["salary_per_minute"], "efficiency_bonus_pct": round(WORKERS[pw.worker_key]["efficiency_bonus"]*100,1), "description": WORKERS[pw.worker_key]["description"], "can_fire": pw.count > 0} for pw in sorted(player.workers, key=lambda x: x.worker_key)],
+        "worker_upgrades": [{
+            "key": upgrade_key,
+            "from_key": cfg["from"],
+            "from_name": WORKERS[cfg["from"]]["name"],
+            "to_key": cfg["to"],
+            "to_name": WORKERS[cfg["to"]]["name"],
+            "cost_dirhams": cfg["cost_dirhams"],
+            "available": next((w.count for w in player.workers if w.worker_key == cfg["from"]), 0) > 0,
+        } for upgrade_key, cfg in WORKER_UPGRADES.items()],
         "caravan_routes": _build_caravan_preview(),
         "active_caravans": caravans,
         "achievements": achievements,
@@ -544,6 +558,21 @@ def hire_worker(db: Session, telegram_id: str, worker_key: str) -> dict:
     player.gold -= price
     player.total_gold_spent += price
     next(x for x in player.workers if x.worker_key == worker_key).count += 1
+    db.commit()
+    return _serialize_state(db, player)
+
+
+
+
+def fire_worker(db: Session, telegram_id: str, worker_key: str) -> dict:
+    if worker_key not in WORKERS:
+        raise HTTPException(status_code=400, detail="Неизвестный тип работника")
+    player = _get_player(db, telegram_id)
+    tick_player(db, player)
+    worker = next(x for x in player.workers if x.worker_key == worker_key)
+    if worker.count < 1:
+        raise HTTPException(status_code=400, detail="Нет работника для увольнения")
+    worker.count -= 1
     db.commit()
     return _serialize_state(db, player)
 

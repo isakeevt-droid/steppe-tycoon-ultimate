@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Steppe Tycoon</title>
-  <link rel="stylesheet" href="/frontend/style.css?v=9.5">
+  <link rel="stylesheet" href="/frontend/style.css?v=10.0">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -89,6 +89,17 @@
         <div id="mine_upgrades" class="card-list compact-top"></div>
       </section>
 
+
+
+      <section id="tab-workers" class="page">
+        <div id="workers_summary" class="stats-grid compact-top"></div>
+        <div class="section-card">
+          <div class="section-title">Рабочие</div>
+          <div class="section-subtitle">Найм, улучшение и увольнение без отдельной перестройки интерфейса</div>
+          <div id="workers_list" class="card-list compact-top"></div>
+        </div>
+      </section>
+
       <section id="tab-achievements" class="page">
         <div id="achievements_summary" class="stats-grid compact-top"></div>
         <div class="section-card">
@@ -118,11 +129,12 @@
       <button class="nav-btn" data-tab="warehouse">📦<span>Склад</span></button>
       <button class="nav-btn" data-tab="caravans">🐫<span>Караваны</span></button>
       <button class="nav-btn" data-tab="mine">⛏️<span>Шахта</span></button>
+      <button class="nav-btn" data-tab="workers">👷<span>Рабочие</span></button>
       <button class="nav-btn" data-tab="achievements">🏆<span>Достижения</span></button>
       <button class="nav-btn" data-tab="leaderboard">👑<span>Топ</span></button>
     </nav>
   </div>
 
-  <script src="/frontend/app.js?v=9.5"></script>
+  <script src="/frontend/app.js?v=10.0"></script>
 </body>
 </html>

@@ -32,6 +32,11 @@ class WorkerUpgradeRequest(BaseModel):
     upgrade_key: str
 
 
+class WorkerFireRequest(BaseModel):
+    telegram_id: str
+    worker_key: str
+
+
 class ProcessRequest(BaseModel):
     telegram_id: str
     recipe_key: str

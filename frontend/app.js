@@ -8,6 +8,7 @@ let activeTab = 'buildings';
 let buildingFilter = 'producing';
 let refreshTimer = null;
 let recentBuiltBuildingKey = null;
+let mineClickBusy = false;
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -167,6 +168,7 @@ function render() {
   renderWarehouse();
   renderCaravans();
   renderMine();
+  renderWorkers();
   renderAchievements();
   renderLeaderboard();
   switchTab(activeTab);
@@ -388,6 +390,62 @@ function renderMine() {
   `);
 }
 
+
+function renderWorkers() {
+  const workers = Array.isArray(state.workers) ? state.workers : [];
+  const upgrades = Array.isArray(state.worker_upgrades) ? state.worker_upgrades : [];
+  const p = state.player || {};
+
+  safeHtml('workers_summary', `
+    <div class="mini-card"><div class="mini-label">Всего рабочих</div><div class="mini-value">${fmt(p.worker_total_count, 0)}</div><div class="mini-sub">Активный персонал</div></div>
+    <div class="mini-card"><div class="mini-label">Бонус</div><div class="mini-value">+${fmt(p.worker_bonus_pct, 1)}%</div><div class="mini-sub">К общей эффективности</div></div>
+    <div class="mini-card"><div class="mini-label">Зарплата</div><div class="mini-value">${fmt(p.worker_salary_per_minute)}</div><div class="mini-sub">Золота в минуту</div></div>
+    <div class="mini-card"><div class="mini-label">Дирхамы</div><div class="mini-value">${fmt(p.dirhams, 0)}</div><div class="mini-sub">Для улучшений</div></div>
+  `);
+
+  safeHtml('workers_list', workers.length ? workers.map((w) => workerCard(w, upgrades)).join('') : '<div class="muted">Рабочих пока нет.</div>');
+}
+
+function workerCard(worker, upgrades) {
+  const relatedUpgrades = upgrades.filter((item) => item.from_key === worker.key);
+  return `
+    <div class="resource-card worker-card ${worker.count <= 0 ? 'is-empty' : ''}">
+      <div class="card-head">
+        <div>
+          <div class="card-title"><span class="emoji">👷</span>${worker.name}</div>
+          <div class="card-desc">${worker.description}</div>
+        </div>
+        <div class="card-level">${fmt(worker.count, 0)} шт.</div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-label">Найм</div><div class="stat-value">${fmt(worker.hire_cost)}</div></div>
+        <div class="stat-box"><div class="stat-label">Зарплата</div><div class="stat-value">${fmt(worker.salary)} / мин</div></div>
+        <div class="stat-box"><div class="stat-label">Бонус</div><div class="stat-value">+${fmt(worker.efficiency_bonus_pct, 1)}%</div></div>
+        <div class="stat-box"><div class="stat-label">Статус</div><div class="stat-value">${worker.count > 0 ? 'Работает' : 'Не нанят'}</div></div>
+      </div>
+      <div class="worker-actions">
+        <div class="btn-row">
+          <button class="btn primary" onclick="hireWorker('${worker.key}')">Нанять</button>
+          <button class="btn" onclick="fireWorker('${worker.key}')" ${worker.count < 1 ? 'disabled' : ''}>Уволить</button>
+        </div>
+        ${relatedUpgrades.length ? `<div class="worker-upgrades">${relatedUpgrades.map(workerUpgradeCard).join('')}</div>` : '<div class="muted">Для этого типа больше нет улучшений.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function workerUpgradeCard(item) {
+  return `
+    <div class="upgrade-pill">
+      <div class="upgrade-pill-main">
+        <div class="upgrade-pill-title">${item.from_name} → ${item.to_name}</div>
+        <div class="upgrade-pill-sub">Улучшение за ${fmt(item.cost_dirhams, 0)}💠</div>
+      </div>
+      <button class="btn tiny" onclick="upgradeWorker('${item.key}')" ${!item.available ? 'disabled' : ''}>Прокачать</button>
+    </div>
+  `;
+}
+
 function renderAchievements() {
   const all = Array.isArray(state.achievements) ? state.achievements : [];
   const active = Array.isArray(state.active_achievements) ? state.active_achievements : all.filter((a) => !a.unlocked);
@@ -470,6 +528,9 @@ async function buyBuilding(key) {
   }
 }
 async function toggleAutomation(key) { await doAction('/api/building/automation', { telegram_id: telegramId, building_key: key }); }
+async function hireWorker(key) { await doAction('/api/worker/hire', { telegram_id: telegramId, worker_key: key }); }
+async function fireWorker(key) { await doAction('/api/worker/fire', { telegram_id: telegramId, worker_key: key }); }
+async function upgradeWorker(key) { await doAction('/api/worker/upgrade', { telegram_id: telegramId, upgrade_key: key }); }
 async function sellResource(key, amount) { if (Number(amount) <= 0) return; await doAction('/api/sell', { telegram_id: telegramId, resource_key: key, amount: Number(amount) }); }
 async function mineUpgrade(type) { await doAction('/api/mine/upgrade', { telegram_id: telegramId, upgrade_type: type }); }
 async function claimCaravan(id) { await doAction('/api/caravan/claim', { telegram_id: telegramId, caravan_id: id }); }
@@ -486,6 +547,8 @@ async function sendCaravan() {
   $('caravan_amount').value = '';
 }
 async function mineClick() {
+  if (mineClickBusy) return;
+  mineClickBusy = true;
   try {
     const btn = $('mine_click_btn');
     btn.classList.remove('hit');
@@ -497,6 +560,8 @@ async function mineClick() {
     if (click) spawnMineFloat(`${click.critical ? 'КРИТ ' : '+'}${fmt(click.income)}`);
   } catch (error) {
     showError(error);
+  } finally {
+    mineClickBusy = false;
   }
 }
 
@@ -512,6 +577,9 @@ function spawnMineFloat(text) {
 
 window.buyBuilding = buyBuilding;
 window.toggleAutomation = toggleAutomation;
+window.hireWorker = hireWorker;
+window.fireWorker = fireWorker;
+window.upgradeWorker = upgradeWorker;
 window.sellResource = sellResource;
 window.mineUpgrade = mineUpgrade;
 window.claimCaravan = claimCaravan;

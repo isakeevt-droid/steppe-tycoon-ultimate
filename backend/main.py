@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+import threading
 
 from .database import Base, engine, get_db
 from .logic import (
@@ -21,6 +23,7 @@ from .logic import (
     claim_caravan,
     get_or_create_player,
     hire_worker,
+    fire_worker,
     make_state,
     mine_click,
     mine_upgrade,
@@ -48,6 +51,7 @@ from .schemas import (
     TelegramAuthRequest,
     WorkerHireRequest,
     WorkerUpgradeRequest,
+    WorkerFireRequest,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -71,6 +75,18 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
+
+_mine_locks: dict[str, threading.Lock] = {}
+_mine_locks_guard = threading.Lock()
+
+
+def _get_mine_lock(telegram_id: str) -> threading.Lock:
+    with _mine_locks_guard:
+        lock = _mine_locks.get(telegram_id)
+        if lock is None:
+            lock = threading.Lock()
+            _mine_locks[telegram_id] = lock
+        return lock
 
 
 def _validate_telegram_init_data(init_data: str) -> dict:
@@ -145,6 +161,11 @@ def api_upgrade_worker(payload: WorkerUpgradeRequest, db: Session = Depends(get_
     return upgrade_worker(db, payload.telegram_id, payload.upgrade_key)
 
 
+@app.post("/api/worker/fire")
+def api_fire_worker(payload: WorkerFireRequest, db: Session = Depends(get_db)) -> dict:
+    return fire_worker(db, payload.telegram_id, payload.worker_key)
+
+
 @app.post("/api/process")
 def api_process(payload: ProcessRequest, db: Session = Depends(get_db)) -> dict:
     return process_resources(db, payload.telegram_id, payload.recipe_key, payload.amount)
@@ -167,7 +188,13 @@ def api_storage_upgrade(payload: StorageUpgradeRequest, db: Session = Depends(ge
 
 @app.post("/api/mine/click")
 def api_mine_click(payload: MineClickRequest, db: Session = Depends(get_db)) -> dict:
-    return mine_click(db, payload.telegram_id)
+    lock = _get_mine_lock(payload.telegram_id)
+    with lock:
+        try:
+            return mine_click(db, payload.telegram_id)
+        except OperationalError as exc:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="Шахта занята, попробуй ещё раз") from exc
 
 
 @app.post("/api/mine/upgrade")

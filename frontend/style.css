@@ -77,7 +77,7 @@ button, input, select { font: inherit; }
 .mine-label { font-size: 18px; font-weight: 800; }
 .mine-float-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .mine-float { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); font-weight: 800; color: #fff3d7; text-shadow: 0 2px 12px rgba(0,0,0,0.45); animation: floatUp .85s ease-out forwards; }
-.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: rgba(6,18,37,0.98); border-top: 1px solid rgba(255,255,255,0.07); z-index: 12; }
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: rgba(6,18,37,0.98); border-top: 1px solid rgba(255,255,255,0.07); z-index: 12; }
 .nav-btn { min-height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 10px; padding: 6px 4px; }
 .nav-btn.active { background: linear-gradient(180deg, rgba(210,154,87,0.34), rgba(210,154,87,0.12)); border-color: rgba(210,154,87,0.56); }
 .not-built { opacity: 0.88; }
@@ -104,3 +104,12 @@ button, input, select { font: inherit; }
 .leaderboard-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
 .leaderboard-score { font-size: 15px; font-weight: 800; text-align: right; }
 @media (max-width: 430px) { .nav-btn span { font-size: 9px; } .bottom-nav { gap: 4px; padding-inline: 6px; } }
+
+.worker-actions { display: grid; gap: 8px; margin-top: 10px; }
+.worker-upgrades { margin-top: 10px; display: grid; gap: 8px; }
+.upgrade-pill { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); }
+.upgrade-pill-main { display: grid; gap: 3px; }
+.upgrade-pill-title { font-size: 13px; font-weight: 800; }
+.upgrade-pill-sub { font-size: 12px; color: var(--muted); }
+.worker-card.is-empty { opacity: 0.92; }
+@media (max-width: 430px) { .bottom-nav { grid-template-columns: repeat(4, 1fr); } }
