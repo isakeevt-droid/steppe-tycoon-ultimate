@@ -216,34 +216,17 @@ function applyActiveTab(tab) {
 }
 
 function switchTab(tab, options = {}) {
-  activeTab = tab;
-  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+  activeTab = tab || 'buildings';
   applyActiveTab(activeTab);
   if (options.scrollToTop) {
-    window.scrollTo(0, 0);
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    });
   }
 }
 
-function getScrollRoot() {
-  return document.scrollingElement || document.documentElement || document.body;
-}
-
-function getScrollY() {
-  return window.scrollY || getScrollRoot().scrollTop || 0;
-}
-
-function setScrollY(value) {
-  const y = Math.max(0, Number(value) || 0);
-  window.scrollTo(0, y);
-  const root = getScrollRoot();
-  if (root) root.scrollTop = y;
-  if (document.body) document.body.scrollTop = y;
-}
-
-function render(options = {}) {
+function render() {
   if (!state?.player) return;
-  const keepScroll = options.keepScroll !== false;
-  const prevScrollY = keepScroll ? getScrollY() : 0;
 
   renderTop();
   renderQuickActions();
@@ -255,10 +238,6 @@ function render(options = {}) {
   renderAchievements();
   renderLeaderboard();
   applyActiveTab(activeTab);
-
-  if (keepScroll) {
-    requestAnimationFrame(() => setScrollY(prevScrollY));
-  }
 }
 
 function renderTop() {

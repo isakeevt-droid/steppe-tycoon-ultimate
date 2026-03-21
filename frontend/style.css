@@ -174,3 +174,21 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+
+/* scroll fix v10.6 */
+#app {
+  display: block;
+  min-height: auto;
+}
+
+.screen {
+  min-height: 100dvh;
+}
+
+.main-content {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+  padding-bottom: calc(var(--bottom-nav-space) + var(--bottom-safe) + 28px);
+}
