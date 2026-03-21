@@ -98,7 +98,7 @@ function bindLifecycleEvents() {
     if (!document.hidden && telegramId) {
       try {
         state = await api(`/api/state/${telegramId}`);
-        render({ keepScroll: false });
+        render();
       } catch (error) {
         console.error('resume refresh error', error);
       }
@@ -217,11 +217,11 @@ function applyActiveTab(tab) {
 
 function switchTab(tab, options = {}) {
   activeTab = tab || 'buildings';
+  localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
   applyActiveTab(activeTab);
   if (options.scrollToTop) {
     requestAnimationFrame(() => {
-      const scroller = document.querySelector('.main-content');
-      if (scroller) scroller.scrollTo({ top: 0, behavior: 'auto' });
+      window.scrollTo({ top: 0, behavior: 'auto' });
     });
   }
 }

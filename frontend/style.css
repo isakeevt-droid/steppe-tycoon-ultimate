@@ -153,84 +153,37 @@ button, input, select { font: inherit; }
   .quick-amounts { grid-template-columns: 1fr 1fr 1fr; }
 }
 
-
+/* clean mobile scroll fix v10.8 */
 html, body {
+  margin: 0;
+  min-height: 100%;
   height: auto;
-  max-height: none;
-  scroll-behavior: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 body {
   position: static;
 }
 
-.main-content, .screen, #app {
-  overflow: visible;
-}
-
-
-#app {
+.screen {
   min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
 }
 
-
-/* scroll fix v10.6 */
 #app {
   display: block;
-  min-height: auto;
-}
-
-.screen {
   min-height: 100dvh;
-}
-
-.main-content {
-  flex: none;
-  min-height: auto;
-  overflow: visible;
-  padding-bottom: calc(var(--bottom-nav-space) + var(--bottom-safe) + 28px);
-}
-
-
-/* scroll fix v10.7 */
-html, body {
-  margin: 0;
-  height: 100%;
-  min-height: 100%;
-  overflow: hidden;
-}
-
-body {
-  position: relative;
-}
-
-.screen {
-  height: 100dvh;
-  min-height: 100dvh;
-}
-
-#app {
-  height: 100dvh;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .topbar {
-  position: relative;
-  top: auto;
-  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
 }
 
 .main-content {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  min-height: auto;
+  overflow: visible;
   padding-bottom: calc(var(--bottom-nav-space) + var(--bottom-safe) + 28px);
 }
