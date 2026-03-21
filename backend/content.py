@@ -246,6 +246,8 @@ SETTINGS = {
     "mine_pickaxe_cost_base": 80.0,
     "mine_pickaxe_cost_growth": 1.65,
     "auto_hours": 8,
+    "auto_sell_speed_multiplier": 4.0,
+    "auto_process_speed_multiplier": 3.0,
     "dirham_price_base": 1500.0,
     "dirham_price_growth": 1.40,
     "dirham_daily_limit": 6,

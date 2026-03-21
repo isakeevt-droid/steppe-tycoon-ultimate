@@ -2,138 +2,102 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Steppe Tycoon v8.0</title>
-  <link rel="stylesheet" href="/frontend/style.css?v=7.9">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Steppe Tycoon</title>
+  <link rel="stylesheet" href="/frontend/style.css?v=9.5">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-  <div id="boot" class="screen auth-screen">
-    <div class="panel auth-panel">
-      <h1>Steppe Tycoon</h1>
-      <p>Добывай сырьё → перерабатывай → продавай → отправляй караваны.</p>
-      <div id="boot_status" class="hint">Подключение к игре…</div>
+  <div id="boot" class="boot screen">
+    <div class="boot-card">
+      <div class="brand-line">🐫 Steppe Tycoon</div>
+      <div id="boot_status" class="boot-text">Подключение…</div>
       <div id="boot_error" class="error"></div>
-      <button id="boot_retry" class="btn hidden">Повторить</button>
+      <button id="boot_retry" class="btn primary hidden">Повторить</button>
     </div>
   </div>
 
   <div id="app" class="screen hidden">
     <header class="topbar">
-      <div class="brand">
-        <div class="title">🐫 Steppe Tycoon</div>
-        <div class="subtitle">Добывай сырьё, перерабатывай товары и веди караваны.</div>
+      <div class="brand-row">
+        <div>
+          <div class="title">Steppe Tycoon</div>
+          <div class="subtitle">Мобильная версия для Telegram</div>
+        </div>
       </div>
-      <div class="stats" id="top_stats"></div>
+      <div id="top_stats" class="stats-grid"></div>
     </header>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="overview">Обзор</button>
-      <button class="tab" data-tab="production">Производство</button>
-      <button class="tab" data-tab="warehouse">Склад</button>
-      <button class="tab" data-tab="caravans">Караваны</button>
-      <button class="tab" data-tab="mine">Шахта</button>
-      <button class="tab" data-tab="progress">Прогресс</button>
-      <button class="tab" data-tab="top">Топ</button>
-    </nav>
-
-    <main class="content">
-      <div id="notifications"></div>
-
-      <section class="tab-page active" id="tab-overview">
-        <div class="grid two-col">
-          <div class="panel">
-            <div class="panel-title">Профиль</div>
-            <div id="profile_grid" class="kv-grid"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-title">Что делать сейчас</div>
-            <div id="current_goal"></div>
-            <div class="actions-list top-space">
-              <button id="open_chest_btn" class="btn">Открыть сундук</button>
-              <button id="buy_dirham_btn" class="btn">Купить дирхам</button>
-            </div>
-            <div id="overview_hint" class="hint top-space"></div>
-          </div>
+    <main class="main-content">
+      <section id="tab-buildings" class="page active">
+        <div class="quick-actions" id="quick_actions"></div>
+        <div class="segmented">
+          <button class="segment active" data-filter="producing">Добыча</button>
+          <button class="segment" data-filter="processing">Переработка</button>
         </div>
+        <div id="buildings_list" class="card-list"></div>
       </section>
 
-      <section class="tab-page" id="tab-production">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">Производство</div>
-            <div id="production_counts" class="panel-meta"></div>
-          </div>
-          <div class="subtabs top-space">
-            <button class="subtab active" data-filter="producing">Производящие</button>
-            <button class="subtab" data-filter="processing">Перерабатывающие</button>
-          </div>
-          <div id="production_list" class="cards top-space"></div>
-        </div>
-      </section>
-
-      <section class="tab-page" id="tab-warehouse">
-        <div class="panel">
-          <div class="panel-title">Склад</div>
-          <div id="warehouse_summary"></div>
-          <div class="actions-list one-line top-space"><button id="upgrade_storage_btn" class="btn">Улучшить склад</button></div>
-          <div id="warehouse_list" class="cards top-space"></div>
-        </div>
-      </section>
-
-      <section class="tab-page" id="tab-caravans">
-        <div class="grid two-col caravan-layout">
-          <div class="panel">
-            <div class="panel-title">Отправить караван</div>
-            <div class="form-grid">
-              <label>Маршрут<select id="route_select"></select></label>
-              <label>Охрана<select id="guard_select"></select></label>
-              <label>Ресурс<select id="resource_select"></select></label>
-              <label>Количество<input id="caravan_amount" type="number" min="1" step="1"></label>
-            </div>
-            <div id="caravan_preview" class="hint"></div>
-            <button id="send_caravan_btn" class="btn primary top-space">Отправить караван</button>
-          </div>
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Активные караваны <span id="caravan_slots"></span></div>
-            </div>
-            <div id="caravan_active"></div>
-            <div class="panel-head top-space">
-              <div class="panel-title">Завершённые</div>
-              <button id="clear_completed_caravans_btn" class="btn">Очистить</button>
-            </div>
-            <div id="caravan_completed"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="tab-page" id="tab-mine">
-        <div class="panel">
-          <div class="mine-head">
+      <section id="tab-warehouse" class="page">
+        <div class="section-card">
+          <div class="section-head">
             <div>
-              <div class="panel-title">Ручная шахта</div>
-              <div class="hint">Оставлены только 2 улучшения: кирка даёт шанс крита, шахта усиливает крит.</div>
+              <div class="section-title">Склад</div>
+              <div id="warehouse_hint" class="section-subtitle"></div>
             </div>
-            <button id="mine_click_btn" class="btn primary mine-click-btn">⛏️ Добыть</button>
+            <button id="upgrade_storage_btn" class="btn">Улучшить</button>
           </div>
-          <div id="mine_info"></div>
+          <div class="storage-bar"><div id="storage_fill" class="storage-fill"></div></div>
+        </div>
+        <div id="warehouse_list" class="card-list compact-top"></div>
+      </section>
+
+      <section id="tab-caravans" class="page">
+        <div class="section-card">
+          <div class="section-title">Отправить караван</div>
+          <div class="form-stack">
+            <label class="field"><span>Маршрут</span><select id="route_select"></select></label>
+            <label class="field"><span>Охрана</span><select id="guard_select"></select></label>
+            <label class="field"><span>Товар</span><select id="resource_select"></select></label>
+            <label class="field"><span>Количество</span><input id="caravan_amount" type="number" min="1" step="1"></label>
+          </div>
+          <div id="caravan_preview" class="hint-block"></div>
+          <button id="send_caravan_btn" class="btn primary full">Отправить караван</button>
+        </div>
+        <div class="section-card">
+          <div class="section-title">Активные</div>
+          <div id="caravan_active" class="card-list"></div>
+        </div>
+        <div class="section-card">
+          <div class="section-head">
+            <div class="section-title">Завершённые</div>
+            <button id="clear_completed_caravans_btn" class="btn tiny">Очистить</button>
+          </div>
+          <div id="caravan_completed" class="card-list"></div>
         </div>
       </section>
 
-      <section class="tab-page" id="tab-progress">
-        <div class="grid two-col">
-          <div class="panel"><div class="panel-title">Текущие цели</div><div id="active_achievements"></div></div>
-          <div class="panel"><div class="panel-title">Полученные достижения</div><div id="completed_achievements"></div></div>
+      <section id="tab-mine" class="page">
+        <div class="mine-wrap">
+          <div class="mine-summary" id="mine_summary"></div>
+          <button id="mine_click_btn" class="mine-button">
+            <span class="mine-icon">⛏️</span>
+            <span class="mine-label">Добыть золото</span>
+          </button>
+          <div id="mine_float_layer" class="mine-float-layer"></div>
         </div>
-      </section>
-
-      <section class="tab-page" id="tab-top">
-        <div class="panel"><div class="panel-title">Топ игроков</div><div id="leaderboard"></div></div>
+        <div id="mine_upgrades" class="card-list compact-top"></div>
       </section>
     </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-tab="buildings">🏭<span>Здания</span></button>
+      <button class="nav-btn" data-tab="warehouse">📦<span>Склад</span></button>
+      <button class="nav-btn" data-tab="caravans">🐫<span>Караваны</span></button>
+      <button class="nav-btn" data-tab="mine">⛏️<span>Шахта</span></button>
+    </nav>
   </div>
 
-  <script src="/frontend/app.js?v=8.0"></script>
+  <script src="/frontend/app.js?v=9.5"></script>
 </body>
 </html>

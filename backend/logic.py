@@ -139,6 +139,14 @@ def _auto_active(pb: PlayerBuilding, now=None) -> bool:
     now = now or now_utc()
     return pb.auto_until is not None and pb.auto_until > now and pb.auto_mode != "off"
 
+def _auto_elapsed(player: Player, pb: PlayerBuilding, elapsed: float, now) -> float:
+    if not _auto_active(pb, now):
+        return 0.0
+    if pb.auto_until is None:
+        return 0.0
+    return min(elapsed, max(0.0, (pb.auto_until - player.last_tick_at).total_seconds()))
+
+
 
 def tick_player(db: Session, player: Player) -> None:
     ensure_defaults(db, player)
@@ -210,33 +218,75 @@ def tick_player(db: Session, player: Player) -> None:
         output_res.amount += amount
         player.total_resources_processed += amount
 
-    # timed automation: production buildings auto-sell at current production speed
+    # automation: faster auto-sale for production and faster auto-processing + auto-sale for processing
+    auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 1.0))
+    auto_process_speed = float(SETTINGS.get("auto_process_speed_multiplier", 1.0))
+
     for pb in player.buildings:
         cfg = BUILDINGS[pb.building_key]
-        if pb.level <= 0 or cfg["category"] != "production" or not _auto_active(pb, now):
-            continue
-        active_elapsed = min(elapsed, max(0.0, (pb.auto_until - player.last_tick_at).total_seconds()))
-        if active_elapsed <= 0:
-            continue
-        res = resources[cfg["resource_key"]]
-        if res.amount <= 0:
+        if pb.level <= 0:
             continue
 
-        auto_sell_per_sec = calculate_building_output_per_second(
-            pb.building_key,
-            pb.level,
-            worker_bonus,
-            global_bonus,
-            payroll_ok,
-        )
-        sell_amount = min(res.amount, round(auto_sell_per_sec * active_elapsed, 4))
-        if sell_amount <= 0:
+        active_elapsed = _auto_elapsed(player, pb, elapsed, now)
+        if active_elapsed <= 0:
             continue
-        market_price = calculate_market_price(cfg["resource_key"], market_seed)
-        total = round(sell_amount * market_price, 2)
-        res.amount -= sell_amount
-        player.gold += total
-        player.total_gold_earned += total
+
+        if cfg["category"] == "production":
+            res = resources[cfg["resource_key"]]
+            if res.amount <= 0:
+                continue
+            auto_sell_per_sec = calculate_building_output_per_second(
+                pb.building_key,
+                pb.level,
+                worker_bonus,
+                global_bonus,
+                payroll_ok,
+            ) * auto_sell_speed
+            sell_amount = min(res.amount, round(auto_sell_per_sec * active_elapsed, 4))
+            if sell_amount <= 0:
+                continue
+            market_price = calculate_market_price(cfg["resource_key"], market_seed)
+            total = round(sell_amount * market_price, 2)
+            res.amount -= sell_amount
+            player.gold += total
+            player.total_gold_earned += total
+            continue
+
+        if cfg["category"] == "processing":
+            # Extra auto-processing on top of passive processing
+            per_sec = calculate_processing_output_per_second(pb.level, cfg.get("batch_size", 10), worker_bonus, global_bonus, payroll_ok)
+            bonus_multiplier = max(0.0, auto_process_speed - 1.0)
+            extra_amount = round(max(0.0, per_sec * active_elapsed * bonus_multiplier), 4)
+            if extra_amount > 0:
+                input_res = resources[cfg["input_key"]]
+                output_res = resources[cfg["output_key"]]
+                extra_amount = min(extra_amount, input_res.amount)
+                free_space = max(0.0, capacity - storage_used)
+                extra_amount = min(extra_amount, free_space)
+                if extra_amount > 0:
+                    input_res.amount -= extra_amount
+                    output_res.amount += extra_amount
+                    player.total_resources_processed += extra_amount
+
+            # Auto-sell processed goods while automation is active
+            output_res = resources[cfg["output_key"]]
+            if output_res.amount <= 0:
+                continue
+            auto_sell_per_sec = calculate_processing_output_per_second(
+                pb.level,
+                cfg.get("batch_size", 10),
+                worker_bonus,
+                global_bonus,
+                payroll_ok,
+            ) * auto_sell_speed
+            sell_amount = min(output_res.amount, round(auto_sell_per_sec * active_elapsed, 4))
+            if sell_amount <= 0:
+                continue
+            market_price = calculate_market_price(cfg["output_key"], market_seed)
+            total = round(sell_amount * market_price, 2)
+            output_res.amount -= sell_amount
+            player.gold += total
+            player.total_gold_earned += total
 
     player.last_tick_at = now
     _update_titles_and_achievements(player)
@@ -308,9 +358,9 @@ def _serialize_state(db: Session, player: Player) -> dict:
         price = round(calculate_building_price(pb.building_key, pb.level), 2)
         auto_active = _auto_active(pb, now)
         auto_seconds = max(0, int((pb.auto_until - now).total_seconds())) if pb.auto_until else 0
-        auto_kind = "sell" if cfg["category"] == "production" else "process"
+        auto_kind = "sell" if cfg["category"] == "production" else pb.auto_mode
         if pb.auto_until is not None and pb.auto_until <= now and pb.auto_mode != "off":
-            notifications.append(f"{cfg['name']}: авто-{ 'продажа' if auto_kind == 'sell' else 'переработка' } остановлена.")
+            notifications.append(f"{cfg['name']}: авто-режим остановлен.")
             pb.auto_mode = "off"
             pb.auto_until = None
             auto_seconds = 0
@@ -326,6 +376,7 @@ def _serialize_state(db: Session, player: Player) -> dict:
             "input_key": cfg.get("input_key"),
             "output_key": cfg.get("output_key"),
             "auto_kind": auto_kind,
+            "auto_mode": pb.auto_mode,
             "auto_active": auto_active,
             "auto_seconds": auto_seconds,
             "auto_cost_dirhams": calculate_auto_activation_cost(pb.level),
@@ -630,17 +681,35 @@ def toggle_building_automation(db: Session, telegram_id: str, building_key: str)
     pb = next(x for x in player.buildings if x.building_key == building_key)
     if pb.level <= 0:
         raise HTTPException(status_code=400, detail="Сначала построй это здание")
-    if _auto_active(pb):
-        pb.auto_mode = "off"
-        pb.auto_until = None
+
+    category = BUILDINGS[building_key]["category"]
+    if category == "production":
+        if _auto_active(pb):
+            pb.auto_mode = "off"
+            pb.auto_until = None
+        else:
+            cost = calculate_auto_activation_cost(pb.level)
+            if player.dirhams < cost:
+                raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
+            player.dirhams -= cost
+            player.total_dirhams_spent += cost
+            pb.auto_mode = "sell"
+            pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
     else:
-        cost = calculate_auto_activation_cost(pb.level)
-        if player.dirhams < cost:
-            raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
-        player.dirhams -= cost
-        player.total_dirhams_spent += cost
-        pb.auto_mode = "sell" if BUILDINGS[building_key]["category"] == "production" else "process"
-        pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
+        if not _auto_active(pb) or pb.auto_mode == "off":
+            cost = calculate_auto_activation_cost(pb.level)
+            if player.dirhams < cost:
+                raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
+            player.dirhams -= cost
+            player.total_dirhams_spent += cost
+            pb.auto_mode = "process"
+            pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
+        elif pb.auto_mode == "process":
+            pb.auto_mode = "process_sell"
+        else:
+            pb.auto_mode = "off"
+            pb.auto_until = None
+
     db.commit()
     return _serialize_state(db, player)
 
