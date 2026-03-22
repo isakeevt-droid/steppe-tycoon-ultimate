@@ -305,9 +305,9 @@ def tick_player(db: Session, player: Player) -> None:
         output_res.amount += amount
         player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
 
-    # automation: auto-sale should clear accumulated stock reliably during active auto mode
-    auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 4.0))
-    auto_process_speed = float(SETTINGS.get("auto_process_speed_multiplier", 3.0))
+    # automation: faster auto-sale for production and faster auto-processing + auto-sale for processing
+    auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 1.0))
+    auto_process_speed = float(SETTINGS.get("auto_process_speed_multiplier", 1.0))
 
     for pb in player.buildings:
         cfg = BUILDINGS[pb.building_key]
@@ -319,8 +319,6 @@ def tick_player(db: Session, player: Player) -> None:
             continue
 
         if cfg["category"] == "production":
-            if pb.auto_mode not in {"sell", "full"}:
-                continue
             res = resources[cfg["resource_key"]]
             if res.amount <= 0:
                 continue
@@ -331,21 +329,16 @@ def tick_player(db: Session, player: Player) -> None:
                 global_bonus,
                 payroll_ok,
             ) * auto_sell_speed
-            sell_amount = max(round(auto_sell_per_sec * active_elapsed, 4), res.amount)
-            sell_amount = min(res.amount, sell_amount)
+            sell_amount = min(res.amount, round(auto_sell_per_sec * active_elapsed, 4))
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["resource_key"], market_seed)
             total = _mul_money(sell_amount, market_price)
             res.amount -= sell_amount
-            storage_used = max(0.0, storage_used - sell_amount)
             _add_gold(player, total)
             continue
 
         if cfg["category"] == "processing":
-            if pb.auto_mode not in {"process", "process_sell", "full"}:
-                continue
-
             # Extra auto-processing on top of passive processing
             per_sec = calculate_processing_output_per_second(pb.level, cfg.get("batch_size", 10), worker_bonus, global_bonus, payroll_ok)
             bonus_multiplier = max(0.0, auto_process_speed - 1.0)
@@ -361,26 +354,22 @@ def tick_player(db: Session, player: Player) -> None:
                     output_res.amount += extra_amount
                     player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(extra_amount), 4)
 
-            # Auto-sell processed goods only when sell mode is explicitly enabled
-            if pb.auto_mode not in {"process_sell", "full"}:
+            # Auto-sell for processing buildings only works in full mode.
+            if pb.auto_mode != "process_sell":
                 continue
+
             output_res = resources[cfg["output_key"]]
             if output_res.amount <= 0:
                 continue
-            auto_sell_per_sec = calculate_processing_output_per_second(
-                pb.level,
-                cfg.get("batch_size", 10),
-                worker_bonus,
-                global_bonus,
-                payroll_ok,
-            ) * auto_sell_speed
-            sell_amount = max(round(auto_sell_per_sec * active_elapsed, 4), output_res.amount)
-            sell_amount = min(output_res.amount, sell_amount)
+
+            # Processing auto-sale should reliably clear finished goods,
+            # otherwise processed stock keeps clogging the warehouse.
+            sell_amount = round(output_res.amount, 4)
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["output_key"], market_seed)
             total = _mul_money(sell_amount, market_price)
-            output_res.amount -= sell_amount
+            output_res.amount = max(0.0, round(output_res.amount - sell_amount, 4))
             storage_used = max(0.0, storage_used - sell_amount)
             _add_gold(player, total)
 
