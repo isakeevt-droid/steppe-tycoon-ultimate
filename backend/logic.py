@@ -305,9 +305,8 @@ def tick_player(db: Session, player: Player) -> None:
         output_res.amount += amount
         player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
 
-    # automation: faster auto-sale for production and faster auto-processing + auto-sale for processing
+    # automation: auto-sale for production and optional finished-goods auto-sale for processing
     auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 1.0))
-    auto_process_speed = float(SETTINGS.get("auto_process_speed_multiplier", 1.0))
 
     for pb in player.buildings:
         cfg = BUILDINGS[pb.building_key]
@@ -339,22 +338,8 @@ def tick_player(db: Session, player: Player) -> None:
             continue
 
         if cfg["category"] == "processing":
-            # Extra auto-processing on top of passive processing
-            per_sec = calculate_processing_output_per_second(pb.level, cfg.get("batch_size", 10), worker_bonus, global_bonus, payroll_ok)
-            bonus_multiplier = max(0.0, auto_process_speed - 1.0)
-            extra_amount = round(max(0.0, per_sec * active_elapsed * bonus_multiplier), 4)
-            if extra_amount > 0:
-                input_res = resources[cfg["input_key"]]
-                output_res = resources[cfg["output_key"]]
-                extra_amount = min(extra_amount, input_res.amount)
-                free_space = max(0.0, capacity - storage_used)
-                extra_amount = min(extra_amount, free_space)
-                if extra_amount > 0:
-                    input_res.amount -= extra_amount
-                    output_res.amount += extra_amount
-                    player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(extra_amount), 4)
-
-            # Auto-sell for processing buildings only works in full mode.
+            # Processing itself already runs passively above.
+            # Automation for processing buildings only means auto-selling finished goods.
             if pb.auto_mode != "process_sell":
                 continue
 
@@ -362,8 +347,6 @@ def tick_player(db: Session, player: Player) -> None:
             if output_res.amount <= 0:
                 continue
 
-            # Processing auto-sale should reliably clear finished goods,
-            # otherwise processed stock keeps clogging the warehouse.
             sell_amount = round(output_res.amount, 4)
             if sell_amount <= 0:
                 continue
@@ -816,19 +799,17 @@ def toggle_building_automation(db: Session, telegram_id: str, building_key: str)
             pb.auto_mode = "sell"
             pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
     else:
-        if not _auto_active(pb) or pb.auto_mode == "off":
+        if _auto_active(pb) and pb.auto_mode == "process_sell":
+            pb.auto_mode = "off"
+            pb.auto_until = None
+        else:
             cost = calculate_auto_activation_cost(pb.level)
             if player.dirhams < cost:
                 raise HTTPException(status_code=400, detail=f"Нужно {cost} дирхам(ов)")
             player.dirhams -= cost
             player.total_dirhams_spent = _money(player.total_dirhams_spent + cost)
-            pb.auto_mode = "process"
-            pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
-        elif pb.auto_mode == "process":
             pb.auto_mode = "process_sell"
-        else:
-            pb.auto_mode = "off"
-            pb.auto_until = None
+            pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
 
     db.commit()
     return _serialize_state(db, player)

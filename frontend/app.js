@@ -307,14 +307,10 @@ function buildAutomationInfo(b) {
       action: b.auto_active ? 'Отключить авто' : `Включить автопродажу · ${b.auto_cost_dirhams}💠`,
     };
   }
-  const mode = b.auto_mode || 'off';
-  if (!b.auto_active || mode === 'off') {
-    return { status: 'Авто выключено', action: `Автопереработка · ${b.auto_cost_dirhams}💠` };
-  }
-  if (mode === 'process') {
-    return { status: `Автопереработка · ${timeFmt(b.auto_seconds)}`, action: 'Добавить автопродажу' };
-  }
-  return { status: `Автопереработка + автопродажа · ${timeFmt(b.auto_seconds)}`, action: 'Отключить авто' };
+  return {
+    status: b.auto_active ? `Автопродажа товара · ${timeFmt(b.auto_seconds)}` : 'Переработка идёт автоматически',
+    action: b.auto_active ? 'Отключить автопродажу' : `Автопродажа товара · ${b.auto_cost_dirhams}💠`,
+  };
 }
 
 function renderBuildings() {
@@ -354,7 +350,7 @@ function buildingCard(b) {
           <div class="stat-box"><div class="stat-label">${isProduction ? 'На складе' : 'Сырьё / товар'}</div><div class="stat-value">${stockText}</div></div>
           <div class="stat-box"><div class="stat-label">Авто</div><div class="stat-value">${b.auto_active ? 'ON' : 'OFF'}</div></div>
         </div>
-        <div class="mode-badge"><span>${auto.status}</span><span class="right">${isProduction ? 'x4' : (b.auto_mode === 'process_sell' ? 'x3 + x4' : 'x3')}</span></div>
+        <div class="mode-badge"><span>${auto.status}</span><span class="right">${isProduction ? 'x4' : 'авто переработка'}</span></div>
         <div class="btn-stack">
           <button class="btn primary" onclick="buyBuilding('${b.key}')">${mainText}</button>
           <button class="btn" onclick="toggleAutomation('${b.key}')">${auto.action}</button>
