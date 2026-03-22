@@ -350,7 +350,7 @@ function buildingCard(b) {
           <div class="stat-box"><div class="stat-label">${isProduction ? 'На складе' : 'Сырьё / товар'}</div><div class="stat-value">${stockText}</div></div>
           <div class="stat-box"><div class="stat-label">Авто</div><div class="stat-value">${b.auto_active ? 'ON' : 'OFF'}</div></div>
         </div>
-        <div class="mode-badge"><span>${auto.status}</span><span class="right">${isProduction ? 'x4' : 'авто переработка'}</span></div>
+        <div class="mode-badge"><span>${auto.status}</span><span class="right">${isProduction ? 'x4' : (b.auto_mode === 'process_sell' ? 'x3 + x4' : 'x3')}</span></div>
         <div class="btn-stack">
           <button class="btn primary" onclick="buyBuilding('${b.key}')">${mainText}</button>
           <button class="btn" onclick="toggleAutomation('${b.key}')">${auto.action}</button>
@@ -682,7 +682,7 @@ function mineClick(event) {
   void btn.offsetWidth;
   btn.classList.add('hit');
 
-  mineQueuedClicks += 1;
+  mineQueuedClicks = Math.min(mineQueuedClicks + 1, 8);
   mineVisualSeed += 1;
 
   const predictedIncome = Number(state?.player?.mine_income || 1);

@@ -71,7 +71,7 @@ _safe_add_column("player_buildings", "auto_until DATETIME")
 _safe_add_column("players", "pets_found INTEGER DEFAULT 0")
 _safe_add_column("players", "active_pet_key VARCHAR(64)")
 
-app = FastAPI(title="Steppe Tycoon", version="7.5.0")
+app = FastAPI(title="Steppe Tycoon", version="7.6.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -194,9 +194,16 @@ def api_mine_click(payload: MineClickRequest, db: Session = Depends(get_db)) -> 
     with lock:
         try:
             return mine_click(db, payload.telegram_id)
+        except HTTPException:
+            db.rollback()
+            raise
         except OperationalError as exc:
             db.rollback()
             raise HTTPException(status_code=503, detail="Шахта занята, попробуй ещё раз") from exc
+        except Exception as exc:
+            db.rollback()
+            print(f"[mine_click] unexpected error for {payload.telegram_id}: {exc}")
+            raise HTTPException(status_code=500, detail="Ошибка шахты, попробуй ещё раз") from exc
 
 
 @app.post("/api/mine/upgrade")

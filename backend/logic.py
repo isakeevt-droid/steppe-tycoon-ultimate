@@ -297,16 +297,15 @@ def tick_player(db: Session, player: Player) -> None:
         input_res = resources[cfg["input_key"]]
         output_res = resources[cfg["output_key"]]
         amount = min(amount, input_res.amount)
-        free_space = max(0.0, capacity - storage_used)
-        amount = min(amount, free_space)
         if amount <= 0:
             continue
         input_res.amount -= amount
         output_res.amount += amount
         player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
 
-    # automation: auto-sale for production and optional finished-goods auto-sale for processing
+    # automation: faster auto-sale for production and faster auto-processing + auto-sale for processing
     auto_sell_speed = float(SETTINGS.get("auto_sell_speed_multiplier", 1.0))
+    auto_process_speed = float(SETTINGS.get("auto_process_speed_multiplier", 1.0))
 
     for pb in player.buildings:
         cfg = BUILDINGS[pb.building_key]
@@ -338,22 +337,39 @@ def tick_player(db: Session, player: Player) -> None:
             continue
 
         if cfg["category"] == "processing":
-            # Processing itself already runs passively above.
-            # Automation for processing buildings only means auto-selling finished goods.
+            # Extra auto-processing on top of passive processing
+            per_sec = calculate_processing_output_per_second(pb.level, cfg.get("batch_size", 10), worker_bonus, global_bonus, payroll_ok)
+            bonus_multiplier = max(0.0, auto_process_speed - 1.0)
+            extra_amount = round(max(0.0, per_sec * active_elapsed * bonus_multiplier), 4)
+            if extra_amount > 0:
+                input_res = resources[cfg["input_key"]]
+                output_res = resources[cfg["output_key"]]
+                extra_amount = min(extra_amount, input_res.amount)
+                if extra_amount > 0:
+                    input_res.amount -= extra_amount
+                    output_res.amount += extra_amount
+                    player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(extra_amount), 4)
+
             if pb.auto_mode != "process_sell":
                 continue
 
+            # Auto-sell processed goods only in process_sell mode
             output_res = resources[cfg["output_key"]]
             if output_res.amount <= 0:
                 continue
-
-            sell_amount = round(output_res.amount, 4)
+            auto_sell_per_sec = calculate_processing_output_per_second(
+                pb.level,
+                cfg.get("batch_size", 10),
+                worker_bonus,
+                global_bonus,
+                payroll_ok,
+            ) * auto_sell_speed
+            sell_amount = min(output_res.amount, round(auto_sell_per_sec * active_elapsed, 4))
             if sell_amount <= 0:
                 continue
             market_price = calculate_market_price(cfg["output_key"], market_seed)
             total = _mul_money(sell_amount, market_price)
-            output_res.amount = max(0.0, round(output_res.amount - sell_amount, 4))
-            storage_used = max(0.0, storage_used - sell_amount)
+            output_res.amount -= sell_amount
             _add_gold(player, total)
 
     player.last_tick_at = now
@@ -690,9 +706,8 @@ def process_resources(db: Session, telegram_id: str, recipe_key: str, amount: fl
     out_res = _get_or_create_resource(player, recipe["output_key"])
     if in_res.amount < amount:
         raise HTTPException(status_code=400, detail="Недостаточно сырья")
-    free_space = calculate_storage_capacity(player.storage_level) - _storage_used(player)
-    if free_space < amount:
-        raise HTTPException(status_code=400, detail="Недостаточно места на складе")
+    # 1 к 1 переработка не увеличивает занятое место на складе,
+    # поэтому дополнительное свободное место не требуется.
     in_res.amount -= amount
     out_res.amount += amount
     player.total_resources_processed = round(float(player.total_resources_processed or 0.0) + float(amount), 4)
@@ -799,7 +814,7 @@ def toggle_building_automation(db: Session, telegram_id: str, building_key: str)
             pb.auto_mode = "sell"
             pb.auto_until = now_utc() + timedelta(hours=SETTINGS["auto_hours"])
     else:
-        if _auto_active(pb) and pb.auto_mode == "process_sell":
+        if _auto_active(pb):
             pb.auto_mode = "off"
             pb.auto_until = None
         else:
